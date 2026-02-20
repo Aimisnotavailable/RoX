@@ -3,7 +3,8 @@ import moderngl
 import sys
 import glm
 from PIL import Image
-from src.camera import Camera
+from src.rtscamera import RTSCamera
+from src.fpscamera import FPSCamera 
 from src.mesh import CubeMesh
 from src.builder import VoxelBuilder
 from src.quad import ScreenQuad  # <--- NEW
@@ -20,10 +21,6 @@ class GraphicsEngine:
         pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
         pygame.display.set_mode(self.WIN_SIZE, pygame.OPENGL | pygame.DOUBLEBUF)
         
-        # --- FIX: MOUSE LOCKING ---
-        pygame.event.set_grab(True)      # Locks mouse to window
-        pygame.mouse.set_visible(False)  # Hides the cursor
-        
         self.ctx = moderngl.create_context()
         self.ctx.enable(moderngl.DEPTH_TEST | moderngl.CULL_FACE)
         self.ctx.enable(moderngl.BLEND) 
@@ -32,13 +29,18 @@ class GraphicsEngine:
         self.time = 0
         self.delta_time = 0
         
+        # MODE SWITCHING
+        # --- SINGLE BUILDER, TWO CAMERAS ---
+        self.builder = VoxelBuilder(self)
+        self.cam_fps = FPSCamera(self)
+        self.cam_rts = RTSCamera(self)
+
         # Assets
         self.prog = self.create_shader_program('shaders/default')
-        self.camera = Camera(self)
         self.mesh = CubeMesh(self)
+
         # Load the new array instead of the old test.png
         self.texture_array = self.load_texture_array('assets/textures/tex_array_1.png')
-        self.builder = VoxelBuilder(self)
         
         # Background
         self.quad = ScreenQuad(self)
@@ -49,6 +51,26 @@ class GraphicsEngine:
         self.font = pygame.font.SysFont('arial', 30, bold=True)
         self.ui_surface = pygame.Surface(self.WIN_SIZE, flags=pygame.SRCALPHA)
         self.ui_texture = self.ctx.texture(self.WIN_SIZE, 4)
+
+        # Start in FPS Mode
+        self.is_rts_mode = False
+        self.camera = self.cam_fps
+        pygame.event.set_grab(True)
+        pygame.mouse.set_visible(False)
+    
+    def switch_camera_mode(self):
+        self.is_rts_mode = not self.is_rts_mode
+        
+        if self.is_rts_mode:
+            print("Mode: RTS")
+            self.camera = self.cam_rts
+            pygame.event.set_grab(False)
+            pygame.mouse.set_visible(True)
+        else:
+            print("Mode: FPS")
+            self.camera = self.cam_fps
+            pygame.event.set_grab(True)
+            pygame.mouse.set_visible(False)
 
     def load_program(self, path):
         # Helper to load shaders easily
@@ -130,7 +152,7 @@ class GraphicsEngine:
         self.ui_surface.fill((0, 0, 0, 0))
         
         # 2. Draw Text (Standard Pygame)
-        text = f"FPS: {int(self.clock.get_fps())} | Mode: {self.builder.mode}"
+        text = f"FPS: {int(self.clock.get_fps())} | Camera : {'RTS' if self.is_rts_mode else 'FPS'}"
         text_surf = self.font.render(text, True, (255, 255, 0)) # Yellow Text
         self.ui_surface.blit(text_surf, (20, 20))
         
@@ -196,6 +218,10 @@ class GraphicsEngine:
             
             if event.type == pygame.KEYDOWN and event.key == pygame.K_TAB:
                 self.builder.toggle_mode()
+                
+            # Mode Switch
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_m:
+                self.switch_camera_mode()
 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1: 
