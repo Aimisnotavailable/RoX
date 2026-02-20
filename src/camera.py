@@ -19,7 +19,7 @@ class Camera:
         self.sensitivity = 0.1
 
     def rotate(self):
-        rel_x, rel_y = pygame.mouse.get_rel()
+        rel_x, rel_y = [0,0] #pygame.mouse.get_rel()
         self.yaw += rel_x * self.sensitivity
         self.pitch -= rel_y * self.sensitivity
         self.pitch = max(-89, min(89, self.pitch))

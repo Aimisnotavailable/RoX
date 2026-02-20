@@ -100,7 +100,6 @@ class VoxelBuilder:
 
     def update(self):
         keys = pygame.key.get_pressed()
-        buttons = pygame.key.get
         
         # Rotation
         speed = 2.0 * self.app.delta_time * 0.001
