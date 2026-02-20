@@ -57,20 +57,38 @@ class GraphicsEngine:
         self.camera = self.cam_fps
         pygame.event.set_grab(True)
         pygame.mouse.set_visible(False)
-    
+
+
+        # Controls
+        self.clicking = False
+        self.delay = 0
+
     def switch_camera_mode(self):
+        """
+        Toggle between RTS and FPS modes while preserving the player's FPS position.
+        - When switching to RTS: save FPS state and base RTS camera on FPS position.
+        - When switching back to FPS: restore the saved FPS state.
+        """
         self.is_rts_mode = not self.is_rts_mode
-        
+
         if self.is_rts_mode:
+            # Going into RTS: save FPS state and position RTS above the FPS player
             print("Mode: RTS")
+            # Save FPS so we can restore later
+            self.cam_fps.save_state()
+            # Base RTS camera on the FPS camera so the user doesn't get lost
+            self.cam_rts.from_fps(self.cam_fps)
             self.camera = self.cam_rts
             pygame.event.set_grab(False)
             pygame.mouse.set_visible(True)
         else:
+            # Going back to FPS: restore the saved FPS state
             print("Mode: FPS")
+            self.cam_fps.restore_state()
             self.camera = self.cam_fps
             pygame.event.set_grab(True)
             pygame.mouse.set_visible(False)
+
 
     def load_program(self, path):
         # Helper to load shaders easily
@@ -224,18 +242,27 @@ class GraphicsEngine:
                 self.switch_camera_mode()
 
             if event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1: 
-                    self.builder.handle_click()
+                if event.button == 1:
+                    self.clicking = True    
 
                 if event.button == 4:
                     self.builder.current_block_index = (self.builder.current_block_index + 1) % len(BLOCK_TYPES)
                 if event.button == 5:
                     self.builder.current_block_index = (self.builder.current_block_index - 1) % len(BLOCK_TYPES)
 
-            
+            if event.type == pygame.MOUSEBUTTONUP:
+                if event.button == 1:
+                    self.clicking = False
+
             if event.type == pygame.KEYDOWN and event.key == pygame.K_F1:
                 self.use_aspect_ratio = not self.use_aspect_ratio
-    
+        
+        if self.clicking:
+            if not self.delay:
+                self.builder.handle_click()
+                self.delay = 5
+        self.delay = max(0, self.delay - 0.06 * self.delta_time)
+        
     def run(self):
         while True:
             self.handle_events()
