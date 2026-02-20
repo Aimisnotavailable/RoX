@@ -1,7 +1,6 @@
-from scripts.config import *
+from src.engine import GraphicsEngine
 
-class App:
-    def __init__(self):
-        self.screen = pygame.set_mode((WIDTH, HEIGHT))
-        
-
+if __name__ == '__main__':
+    # Ensure you have a 'assets/textures/test.png' or the fallback will run
+    app = GraphicsEngine()
+    app.run()
