@@ -1,24 +1,58 @@
 import glm
 import pygame
 
+# --- NEW: Block Definitions ---
+# Format: ID, Name, (Side, Top, Bottom) texture layers
+# Assuming your image rows are: 0=Air, 1=Sand, 2=Grass, etc.
+# And columns are: 0=Side, 1=Top, 2=Bottom
+BLOCK_TYPES = [
+    # ID 1: Sand (Row 1)
+    {"id": 1, "name": "Sand",  "layers": (3, 4, 5)},   
+    
+    # ID 2: Grass (Row 2)
+    {"id": 2, "name": "Grass", "layers": (6, 7, 8)},   
+    
+    # ID 3: Dirt (Row 3)
+    {"id": 3, "name": "Dirt",  "layers": (9, 10, 11)},   
+    
+    # ID 4: Stone (Row 4)
+    {"id": 4, "name": "Stone", "layers": (12, 13, 14)}, 
+    
+    # ID 5: Snow (Row 5)
+    {"id": 5, "name": "Snow",  "layers": (15, 16, 17)},
+
+    # ID 6: Leaves (Row 6)
+    {"id": 6, "name": "Leaves","layers": (18, 19, 20)},
+
+    # ID 7: Wood (Row 7)
+    {"id": 7, "name": "Wood",  "layers": (21, 22, 23)},
+]
 class VoxelBuilder:
     def __init__(self, app):
         self.app = app
-        self.cubes = {(0, 0, 0)}
+        # Dictionary now stores TYPE:  {(x,y,z): block_type_id}
+        # 0=Grass, 1=Dirt, 2=Stone, 3=Wood
+        self.cubes = {
+            (0, 0, 0): 0, 
+            (1, 0, 0): 1, 
+            (-1, 0, 0): 2,
+        }
         self.scale = 1.0
         self.rotation = glm.vec2(0, 0)
         
         self.hovered_block = None
         self.place_pos = None
+        self.mode = 'BUILD'
         
-        # New State
-        self.mode = 'BUILD' # 'BUILD' or 'DELETE'
+        # Default to Grass (Index 1 in our list, which is ID 2)
+        self.current_block_index = 1
         
-        # Font for UI
-        self.font = pygame.font.SysFont('arial', 24, bold=True)
+        # ATLAS CONFIG (2x2 Grid)
+        self.atlas_rows = 2
+        self.atlas_cols = 2
 
+    # ... (Keep get_model_matrix and raycast SAME as before) ...
     def get_model_matrix(self):
-        """Reconstructs the matrix used to position the whole group."""
         model = glm.mat4(1.0)
         model = glm.rotate(model, self.rotation.y, glm.vec3(0, 1, 0))
         model = glm.rotate(model, self.rotation.x, glm.vec3(1, 0, 0))
@@ -26,137 +60,143 @@ class VoxelBuilder:
         return model
 
     def raycast(self):
-        """
-        Casts a ray from the camera into the Local Model Space of the cubes.
-        Returns: (hit_block_coord, empty_face_coord)
-        """
-        # 1. Get Camera Ray in World Space
+        # (Copy your existing raycast logic exactly as it was)
+        # Just ensure checking `if check_pos in self.cubes:` works (it does, keys are checked)
         cam_pos = self.app.camera.position
         cam_dir = self.app.camera.forward
-        
-        # 2. Convert Ray to Model Space
-        # We apply the INVERSE of the model matrix to the ray.
-        # This effectively 'un-rotates' and 'un-scales' the ray so it matches the simple integer grid.
         model_mat = self.get_model_matrix()
         inv_model = glm.inverse(model_mat)
-        
-        # Transform Origin (Position needs w=1)
         ray_origin = inv_model * glm.vec4(cam_pos, 1.0)
         ray_origin = glm.vec3(ray_origin)
-        
-        # Transform Direction (Direction needs w=0 so translation is ignored)
         ray_dir = inv_model * glm.vec4(cam_dir, 0.0)
         ray_dir = glm.vec3(ray_dir)
-        ray_dir = glm.normalize(ray_dir) # Normalize after scaling
-        
-        # 3. Step through the grid (Simple Ray Marching)
-        # We step a tiny bit forward and check if we are inside a cube.
+        ray_dir = glm.normalize(ray_dir)
         step_size = 0.05
-        max_dist = 20.0 # How far we can reach
-        
+        max_dist = 20.0
         current_pos = ray_origin
-        last_pos = None # Keeps track of the "empty" air block before we hit something
-        
-        # Maximum iterations = distance / step
+        last_pos = None
         for i in range(int(max_dist / step_size)):
             current_pos += ray_dir * step_size
-            
-            # Round to nearest integer grid coordinate
-            x = int(round(current_pos.x))
-            y = int(round(current_pos.y))
-            z = int(round(current_pos.z))
-            check_pos = (x, y, z)
-            
+            check_pos = (int(round(current_pos.x)), int(round(current_pos.y)), int(round(current_pos.z)))
             if check_pos in self.cubes:
-                # HIT! We found a block.
-                # Return (The Block We Hit, The Empty Space Before It)
-                
-                # If we hit something immediately (inside a block), return None
-                if last_pos is None:
-                    return None, None
-                    
-                # Calculate integer coords for the previous step
-                lx = int(round(last_pos.x))
-                ly = int(round(last_pos.y))
-                lz = int(round(last_pos.z))
+                if last_pos is None: return None, None
+                lx, ly, lz = int(round(last_pos.x)), int(round(last_pos.y)), int(round(last_pos.z))
                 return check_pos, (lx, ly, lz)
-            
             last_pos = glm.vec3(current_pos)
-
-        # Ray went too far and hit nothing
         return None, None
 
     def handle_click(self):
-        """Single function to handle action based on mode"""
-        if self.mode == 'BUILD':
-            if self.place_pos:
-                self.cubes.add(self.place_pos)
+        if self.mode == 'BUILD' and self.place_pos:
+            # Store the actual BLOCK ID (e.g., 2 for Grass)
+            block_data = BLOCK_TYPES[self.current_block_index]
+            self.cubes[self.place_pos] = block_data['id']
         elif self.mode == 'DELETE':
             if self.hovered_block:
-                self.cubes.discard(self.hovered_block)
-    
-    def toggle_mode(self):
-        if self.mode == 'BUILD':
-            self.mode = 'DELETE'
-        else:
-            self.mode = 'BUILD'
-            
-    def add_cube(self):
-        if self.place_pos:
-            self.cubes.add(self.place_pos)
+                # .pop(key) removes it safely
+                self.cubes.pop(self.hovered_block, None)
 
-    def remove_cube(self):
-        if self.hovered_block:
-            self.cubes.discard(self.hovered_block)
+    def toggle_mode(self):
+        self.mode = 'DELETE' if self.mode == 'BUILD' else 'BUILD'
 
     def update(self):
-        # Rotate logic
         keys = pygame.key.get_pressed()
-        speed = 2.0 * self.app.delta_time * 0.001
+        buttons = pygame.key.get
         
+        # Rotation
+        speed = 2.0 * self.app.delta_time * 0.001
         if keys[pygame.K_LEFT]:  self.rotation.y -= speed
         if keys[pygame.K_RIGHT]: self.rotation.y += speed
         if keys[pygame.K_UP]:    self.rotation.x -= speed
         if keys[pygame.K_DOWN]:  self.rotation.x += speed
         if keys[pygame.K_z]:     self.scale += speed * 0.5
         if keys[pygame.K_x]:     self.scale = max(0.1, self.scale - speed * 0.5)
+        
+        # UI Update for Window Title
+        title = f"RoX | Mode: {self.mode} | Block ID: {self.current_block_index} | FPS: {int(self.app.clock.get_fps())}"
+        pygame.display.set_caption(title)
 
-        # Perform Raycast every frame
         self.hovered_block, self.place_pos = self.raycast()
 
-        # --- UI UPDATE ---
-        # Instead of rendering text (hard), we update the window title (easy & clean)
-        title = f"RoX Engine | MODE: {self.mode} | Cubes: {len(self.cubes)} | FPS: {int(self.app.clock.get_fps())}"
-        pygame.display.set_caption(title)
+    def get_uv_offset(self, block_id):
+        """Calculates (u, v) offset for a given block ID"""
+        # ID 0 -> Row 0, Col 0
+        # ID 1 -> Row 0, Col 1
+        # ID 2 -> Row 1, Col 0 (In OpenGL usually bottom-up, but let's assume top-down for ease)
+        
+        # If we assume standard left-to-right reading:
+        col = block_id % self.atlas_cols
+        row = block_id // self.atlas_cols
+        
+        # Size of one tile (e.g. 0.5 for 2x2)
+        step = 1.0 / self.atlas_cols 
+        
+        # Note: Depending on how your texture is flipped, 'row' might need to be inverted
+        return glm.vec2(col * step, row * step)
 
     def render(self):
         base_model = self.get_model_matrix()
         
-        # 1. Render Solid Blocks
-        self.app.prog['is_wireframe'].value = 0 # Tell shader to draw textures
+        # Enable blending for ghost transparency
+        self.app.ctx.enable(self.app.ctx.BLEND)
+        self.app.texture_array.use(location=0)
         
-        for pos in self.cubes:
-            model = glm.translate(base_model, glm.vec3(pos))
-            self.app.prog['m_model'].write(model)
+        # 1. RENDER WORLD BLOCKS
+        self.app.prog['is_ghost'].value = 0
+        self.app.prog['is_wireframe'].value = 0
+        
+        for pos, block_id in self.cubes.items():
+            # Find block data
+            data = next((b for b in BLOCK_TYPES if b['id'] == block_id), BLOCK_TYPES[0])
             
-            # Highlight Logic (Red tint for delete)
+            # --- HIGHLIGHT LOGIC (Restored) ---
             if self.mode == 'DELETE' and pos == self.hovered_block:
-                self.app.prog['objectColor'].write(glm.vec3(1.0, 0.3, 0.3))
+                # Turn the BLOCK ITSELF red (no wireframe cage)
+                self.app.prog['objectColor'].write(glm.vec3(1.0, 0.2, 0.2)) 
             else:
+                # IMPORTANT: Reset to White for normal blocks!
                 self.app.prog['objectColor'].write(glm.vec3(1.0, 1.0, 1.0))
-            
-            self.app.mesh.render() # Renders Solid Triangles
 
-        # 2. Render Cursor (Real Lines)
-        # Only show cursor if we have a valid place position AND we are in BUILD mode
+            self.render_block(pos, base_model, data['layers'])
+
+        # 2. RENDER GHOST BLOCK (Build Mode Only)
         if self.mode == 'BUILD' and self.place_pos:
-            self.app.prog['is_wireframe'].value = 1 # Tell shader to draw solid color
+            data = BLOCK_TYPES[self.current_block_index]
             
-            model = glm.translate(base_model, glm.vec3(self.place_pos))
-            # Optional: Scale it slightly up so it doesn't z-fight if overlapping
-            model = glm.scale(model, glm.vec3(1.05)) 
+            self.app.prog['is_ghost'].value = 1 
+            # Make the ghost slightly pulsing or just white tint
+            self.app.prog['objectColor'].write(glm.vec3(1.0, 1.0, 1.0))
             
-            self.app.prog['m_model'].write(model)
-            self.app.prog['objectColor'].write(glm.vec3(0.0, 1.0, 0.0)) # Bright Green
+            self.render_block(self.place_pos, base_model, data['layers'])
             
-            self.app.mesh.render_lines() # <--- Use the new Line Renderer
+            # Reset ghost mode immediately
+            self.app.prog['is_ghost'].value = 0
+
+        # 3. BUILD CURSOR (Optional Wireframe)
+        # Only show the green wireframe in BUILD mode so it doesn't annoy you in Delete mode
+        if self.mode == 'BUILD' and self.place_pos:
+             self.app.prog['is_wireframe'].value = 1
+             
+             model = glm.translate(base_model, glm.vec3(self.place_pos))
+             # Scale 1.05 makes it "clip" around. Scale 1.00 makes it "phase" inside.
+             # Let's use 1.005 for a snug fit.
+             model = glm.scale(model, glm.vec3(1.005)) 
+             
+             self.app.prog['m_model'].write(model)
+             self.app.prog['objectColor'].write(glm.vec3(0.0, 1.0, 0.0))
+             
+             self.app.mesh.render_lines()
+             self.app.prog['is_wireframe'].value = 0
+
+    def render_block(self, pos, base_model, layers):
+        model = glm.translate(base_model, glm.vec3(pos))
+        self.app.prog['m_model'].write(model)
+        
+        # layers[0] is Bottom (e.g., 3)
+        # layers[1] is Side   (e.g., 4)
+        # layers[2] is Top    (e.g., 5)
+        
+        self.app.prog['u_layer_bottom'].value=layers[0] # Use .write() for ints (safer) or .value
+        self.app.prog['u_layer_side'].value=layers[1]
+        self.app.prog['u_layer_top'].value=layers[2]
+        
+        self.app.mesh.render()

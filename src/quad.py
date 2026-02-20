@@ -28,17 +28,22 @@ class ScreenQuad:
         content = [(self.vbo, '2f 2f', 'in_position', 'in_texcoord')]
         self.vao = self.ctx.vertex_array(self.program, content)
 
-    def render(self, texture, image_size=None):
+    def render(self, texture, image_size=None, keep_aspect=False):
         texture.use(location=0)
         
-        # Send Screen Resolution
+        # 1. Send Screen Resolution (Required for aspect math)
         self.program['u_resolution'].value = self.app.WIN_SIZE
         
-        # Send Image Resolution
+        # 2. Send Image Resolution
         if image_size:
             self.program['u_image_res'].value = image_size
         else:
-            # If no size given (like for UI), assume it matches screen
+            # If no size given, assume full screen (1:1 with window)
             self.program['u_image_res'].value = self.app.WIN_SIZE
+
+        # 3. THE MISSING PIECE: Send the Toggle State!
+        # We convert the boolean (True/False) to an Integer (1/0)
+        if 'u_keep_aspect' in self.program:
+            self.program['u_keep_aspect'].value = 1 if keep_aspect else 0
             
         self.vao.render()

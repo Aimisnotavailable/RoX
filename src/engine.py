@@ -7,6 +7,7 @@ from src.camera import Camera
 from src.mesh import CubeMesh
 from src.builder import VoxelBuilder
 from src.quad import ScreenQuad  # <--- NEW
+from src.builder import BLOCK_TYPES
 
 class GraphicsEngine:
     def __init__(self, win_size=(1280, 720)):
@@ -19,32 +20,34 @@ class GraphicsEngine:
         pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
         pygame.display.set_mode(self.WIN_SIZE, pygame.OPENGL | pygame.DOUBLEBUF)
         
+        # --- FIX: MOUSE LOCKING ---
+        pygame.event.set_grab(True)      # Locks mouse to window
+        pygame.mouse.set_visible(False)  # Hides the cursor
+        
         self.ctx = moderngl.create_context()
         self.ctx.enable(moderngl.DEPTH_TEST | moderngl.CULL_FACE)
-        # Enable Blending for UI transparency
         self.ctx.enable(moderngl.BLEND) 
         
         self.clock = pygame.time.Clock()
         self.time = 0
         self.delta_time = 0
         
-        # --- 1. Load Main Assets ---
+        # Assets
         self.prog = self.create_shader_program('shaders/default')
         self.camera = Camera(self)
         self.mesh = CubeMesh(self)
-        self.texture = self.load_texture('assets/textures/test.png')
+        # Load the new array instead of the old test.png
+        self.texture_array = self.load_texture_array('assets/textures/tex_array_1.png')
         self.builder = VoxelBuilder(self)
         
-        # --- 2. Background Setup ---
+        # Background
         self.quad = ScreenQuad(self)
-        # Replace with your image file
         self.bg_texture = self.load_texture('assets/textures/sky.png') 
+        self.use_aspect_ratio = True  # <--- NEW TOGGLE STATE
         
-        # --- 3. UI Setup (Pygame Surface) ---
+        # UI
         self.font = pygame.font.SysFont('arial', 30, bold=True)
-        # Create a surface with 'SRGB' (standard colors) and 'Alpha' (transparency)
         self.ui_surface = pygame.Surface(self.WIN_SIZE, flags=pygame.SRCALPHA)
-        # Create a texture from that surface
         self.ui_texture = self.ctx.texture(self.WIN_SIZE, 4)
 
     def load_program(self, path):
@@ -63,6 +66,60 @@ class GraphicsEngine:
         except FileNotFoundError:
             print(f"Error: {path} not found.")
             return self.ctx.texture((2,2), 4, b'\xff'*16)
+    
+    def load_texture_array(self, path):
+        try:
+            img = Image.open(path).convert('RGBA')
+            # remove the flip for now to keep logic simple - we can flip in shader or individual tiles
+            # img = img.transpose(Image.FLIP_TOP_BOTTOM) 
+            
+            # 1. Define Tile Size MANUALLY
+            # Since your image is a grid, we can't guess the size from the width.
+            tile_size = 512 
+            
+            cols = img.width // tile_size
+            rows = img.height // tile_size
+            
+            print(f"Loading Grid: {path}")
+            print(f"  - Grid: {cols} cols x {rows} rows")
+            
+            # 2. Slice the Grid into separate tiles
+            # OpenGL Array expects: [Tile 0 Bytes] + [Tile 1 Bytes] + ...
+            tile_data = bytearray()
+            
+            for y in range(rows):
+                for x in range(cols):
+                    # Calculate coordinates
+                    left = x * tile_size
+                    upper = y * tile_size
+                    right = left + tile_size
+                    lower = upper + tile_size
+                    
+                    # Crop the tile
+                    tile = img.crop((left, upper, right, lower))
+                    
+                    # Optional: Flip tile for OpenGL (Bottom-Left origin)
+                    tile = tile.transpose(Image.FLIP_TOP_BOTTOM)
+                    
+                    tile_data.extend(tile.tobytes())
+            
+            # 3. Create the Array
+            # Total layers = rows * cols (e.g., 8 * 3 = 24 layers)
+            num_layers = rows * cols
+            
+            texture_array = self.ctx.texture_array(
+                (tile_size, tile_size, num_layers), 
+                4, 
+                tile_data
+            )
+            
+            texture_array.build_mipmaps()
+            texture_array.filter = (moderngl.NEAREST_MIPMAP_LINEAR, moderngl.NEAREST)
+            return texture_array
+            
+        except Exception as e:
+            print(f"Error: {e}")
+            return None
 
     def create_shader_program(self, path):
         return self.load_program(path)
@@ -78,8 +135,10 @@ class GraphicsEngine:
         self.ui_surface.blit(text_surf, (20, 20))
         
         # 3. Draw Instructions
-        help_text = self.font.render("TAB: Toggle Mode | Left Click: Action", True, (255, 255, 255))
-        self.ui_surface.blit(help_text, (20, 60))
+        current_data = BLOCK_TYPES[self.builder.current_block_index]
+        block_name = current_data['name']
+        text_surf = self.font.render(f"Selected: {block_name}", True, (255, 255, 255))
+        self.ui_surface.blit(text_surf, (20, 100))
 
         # 4. Upload this surface data to the GPU Texture
         # We must flip it because OpenGL expects bottom-left origin
@@ -96,22 +155,23 @@ class GraphicsEngine:
         self.prog['m_proj'].write(self.camera.m_proj)
         self.prog['m_view'].write(self.camera.m_view)
         self.prog['light_pos'].write(glm.vec3(0, 5, 5))
-        self.prog['cam_pos'].write(self.camera.position)
+        # self.prog['cam_pos'].write(self.camera.position)
 
     def render(self):
-        # 1. Clear Screen
         self.ctx.clear(0.0, 0.0, 0.0)
+        
 
-        # 2. Render Background (Depth Test OFF)
+        # Background
         self.ctx.disable(moderngl.DEPTH_TEST)
         
-        # FIX: Pass the actual size of the background image!
-        # self.bg_texture.size returns (width, height)
-        self.quad.render(self.bg_texture, image_size=self.bg_texture.size)
-        
+        # Pass the toggle state here!
+        self.quad.render(self.bg_texture, 
+                         image_size=self.bg_texture.size, 
+                         keep_aspect=self.use_aspect_ratio)
+                         
         # 3. Render 3D Scene (Depth Test ON)
         self.ctx.enable(moderngl.DEPTH_TEST)
-        self.texture.use(location=0)
+        self.texture_array.use(location=0)
         self.builder.render()
         
         # 4. Render UI Overlay (Depth Test OFF, Blending ON)
@@ -140,10 +200,19 @@ class GraphicsEngine:
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1: 
                     self.builder.handle_click()
+
+                if event.button == 4:
+                    self.builder.current_block_index = (self.builder.current_block_index + 1) % len(BLOCK_TYPES)
+                if event.button == 5:
+                    self.builder.current_block_index = (self.builder.current_block_index - 1) % len(BLOCK_TYPES)
+
+            
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_F1:
+                self.use_aspect_ratio = not self.use_aspect_ratio
     
     def run(self):
         while True:
             self.handle_events()
             self.update()
             self.render()
-            self.delta_time = self.clock.tick(60)
+            self.delta_time = self.clock.tick()

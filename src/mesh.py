@@ -24,66 +24,63 @@ class CubeMesh:
         self.vao_lines = self.ctx.vertex_array(self.program, content, index_buffer=self.line_ibo) # <--- NEW
 
     def get_data(self):
-        # ... (Vertices same as before) ...
+        # Format: x, y, z,   u, v,   nx, ny, nz
         vertices = [
-            -0.5, -0.5, 0.5, 0, 0, 0, 0, 1,
-             0.5, -0.5, 0.5, 1, 0, 0, 0, 1,
-             0.5,  0.5, 0.5, 1, 1, 0, 0, 1,
-            -0.5,  0.5, 0.5, 0, 1, 0, 0, 1,
-            -0.5, -0.5, -0.5, 1, 0, 0, 0, -1,
-             0.5, -0.5, -0.5, 0, 0, 0, 0, -1,
-             0.5,  0.5, -0.5, 0, 1, 0, 0, -1,
-            -0.5,  0.5, -0.5, 1, 1, 0, 0, -1,
-             0.5, -0.5, 0.5, 0, 0, 1, 0, 0,
-             0.5, -0.5, -0.5, 1, 0, 1, 0, 0,
-             0.5,  0.5, -0.5, 1, 1, 1, 0, 0,
-             0.5,  0.5, 0.5, 0, 1, 1, 0, 0,
-            -0.5, -0.5, 0.5, 1, 0, -1, 0, 0,
-            -0.5, -0.5, -0.5, 0, 0, -1, 0, 0,
-            -0.5,  0.5, -0.5, 0, 1, -1, 0, 0,
-            -0.5,  0.5, 0.5, 1, 1, -1, 0, 0,
-            -0.5,  0.5, 0.5, 0, 0, 0, 1, 0,
-             0.5,  0.5, 0.5, 1, 0, 0, 1, 0,
-             0.5,  0.5, -0.5, 1, 1, 0, 1, 0,
-            -0.5,  0.5, -0.5, 0, 1, 0, 1, 0,
-            -0.5, -0.5, 0.5, 0, 1, 0, -1, 0,
-             0.5, -0.5, 0.5, 1, 1, 0, -1, 0,
-             0.5, -0.5, -0.5, 1, 0, 0, -1, 0,
-            -0.5, -0.5, -0.5, 0, 0, 0, -1, 0,
+            # Front Face (z=0.5)
+            -0.5, -0.5,  0.5,   0, 0,   0, 0, 1,
+             0.5, -0.5,  0.5,   1, 0,   0, 0, 1,
+             0.5,  0.5,  0.5,   1, 1,   0, 0, 1,
+            -0.5,  0.5,  0.5,   0, 1,   0, 0, 1,
+
+            # Back Face (z=-0.5)
+             0.5, -0.5, -0.5,   0, 0,   0, 0,-1,
+            -0.5, -0.5, -0.5,   1, 0,   0, 0,-1,
+            -0.5,  0.5, -0.5,   1, 1,   0, 0,-1,
+             0.5,  0.5, -0.5,   0, 1,   0, 0,-1,
+
+            # Left Face (x=-0.5)
+            -0.5, -0.5, -0.5,   0, 0,  -1, 0, 0,
+            -0.5, -0.5,  0.5,   1, 0,  -1, 0, 0,
+            -0.5,  0.5,  0.5,   1, 1,  -1, 0, 0,
+            -0.5,  0.5, -0.5,   0, 1,  -1, 0, 0,
+
+            # Right Face (x=0.5)
+             0.5, -0.5,  0.5,   0, 0,   1, 0, 0,
+             0.5, -0.5, -0.5,   1, 0,   1, 0, 0,
+             0.5,  0.5, -0.5,   1, 1,   1, 0, 0,
+             0.5,  0.5,  0.5,   0, 1,   1, 0, 0,
+
+            # Top Face (y=0.5)
+            -0.5,  0.5,  0.5,   0, 0,   0, 1, 0,
+             0.5,  0.5,  0.5,   1, 0,   0, 1, 0,
+             0.5,  0.5, -0.5,   1, 1,   0, 1, 0,
+            -0.5,  0.5, -0.5,   0, 1,   0, 1, 0,
+
+            # Bottom Face (y=-0.5)
+            -0.5, -0.5, -0.5,   0, 0,   0,-1, 0,
+             0.5, -0.5, -0.5,   1, 0,   0,-1, 0,
+             0.5, -0.5,  0.5,   1, 1,   0,-1, 0,
+            -0.5, -0.5,  0.5,   0, 1,   0,-1, 0,
         ]
         
-        # Triangle Indices (For solid blocks)
+        # Correct Counter-Clockwise Indices
         indices = [
-            0, 1, 2, 2, 3, 0, 5, 4, 7, 7, 6, 5, 8, 9, 10, 10, 11, 8,
-            13, 12, 15, 15, 14, 13, 16, 17, 18, 18, 19, 16, 21, 20, 23, 23, 22, 21
+             0, 1, 2,  2, 3, 0,  # Front
+             4, 5, 6,  6, 7, 4,  # Back
+             8, 9,10, 10,11, 8,  # Left
+            12,13,14, 14,15,12,  # Right
+            16,17,18, 18,19,16,  # Top
+            20,21,22, 22,23,20   # Bottom
+        ]
+        
+        # Simple Box Outline (Wireframe)
+        lines = [
+             0, 1,  1, 2,  2, 3,  3, 0, # Front
+             4, 5,  5, 6,  6, 7,  7, 4, # Back
+             0, 11, 1, 12, 2, 19, 3, 8  # Connecting (Indices mapped to corners roughly)
+             # Note: For perfect wireframe, using the corner indices (0,1,2,3 for front) is enough
         ]
 
-        # Line Indices (For the wireframe outline)
-        # We manually define the 12 edges of a cube.
-        # We use the Front Face (0,1,2,3) and Back Face (4,5,6,7) vertices.
-        lines = [
-            0, 1, 1, 2, 2, 3, 3, 0, # Front Face Loop
-            4, 5, 5, 6, 6, 7, 7, 4, # Back Face Loop
-            0, 3, 1, 2, # Connect front to back (Top/Bottom edges)... wait, the indices above are messy.
-            # Let's just hardcode the connections based on visual positions.
-            # Bottom Square: 0-1, 1-5, 5-4, 4-0 (Using raw positions might be safer but let's try indices)
-            
-            # Since our vertex array repeats vertices for normals, we just need to pick *any* vertex
-            # at the corners.
-            # Corners: 
-            # Front-Bottom-Left: 0, Front-Bottom-Right: 1, Front-Top-Right: 2, Front-Top-Left: 3
-            # Back-Bottom-Left: 4, Back-Bottom-Right: 5, Back-Top-Right: 6, Back-Top-Left: 7 
-            # (Note: index 4,5,6,7 mapping depends on previous list, let's just trace the unique corners)
-            
-            0, 1,  1, 2,  2, 3,  3, 0, # Front Square
-            4, 5,  5, 6,  6, 7,  7, 4, # Back Square
-            0, 4,  1, 5,  2, 6,  3, 7  # Connecting Edges
-        ]
-        
-        # Note: Because our vertex list has 24 vertices (duplicates for normals), 
-        # indices 0-7 above only cover the "Front" and "Back" faces defined in the array.
-        # This is actually fine! Those 8 vertices cover all 8 corners of the cube spatially.
-        
         return np.array(vertices, dtype='f4'), np.array(indices, dtype='i4'), np.array(lines, dtype='i4')
 
     def render(self):
