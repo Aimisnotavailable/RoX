@@ -1,4 +1,13 @@
-from scripts.config import *
+from colorama import Fore, Style
+# --- LOGGER CONFIG ---
+LOG_DIR = 'logs.txt'
+CORE_COLOR = Fore.BLUE
+APP_COLOR = Fore.YELLOW
+ERROR_COLOR = Fore.RED
+DEBUG_COLOR = Fore.MAGENTA
+GAME_COLOR = Fore.GREEN
+
+COLORS = {'CORE' : CORE_COLOR, 'APP' : APP_COLOR, 'ERROR' : ERROR_COLOR, 'DEBUG' : DEBUG_COLOR, 'GAME' : GAME_COLOR}
 
 def dumps(text):
     with open(LOG_DIR, 'a') as fp:

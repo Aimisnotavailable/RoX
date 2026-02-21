@@ -2,10 +2,10 @@ import math
 import cv2
 import mediapipe as mp
 import pygame
+import sys
 
 from collections import deque, namedtuple
 from scripts.logger import get_logger_info
-from colorama import Fore, Style
 from screeninfo import get_monitors
 
 
@@ -33,10 +33,5 @@ ATTACK_COOLDOWN = 20
 
 # ------------------
 
-# --- LOGGER CONFIG ---
-LOG_DIR = 'logs.txt'
-CORE_COLOR = Fore.BLUE
-APP_COLOR = Fore.YELLOW
-ERROR_COLOR = Fore.RED
-
-COLORS = {'CORE' : CORE_COLOR, 'APP' : APP_COLOR, 'ERROR' : ERROR_COLOR}
+# 2D CONFIGS -----------------------
+BLOCK_SIZE = 16

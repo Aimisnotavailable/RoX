@@ -10,7 +10,7 @@ from src.builder import VoxelBuilder
 from src.quad import ScreenQuad  # <--- NEW
 from src.builder import BLOCK_TYPES
 
-class GraphicsEngine:
+class GraphicsEngine3D:
     def __init__(self, win_size=(1280, 720)):
         pygame.init()
         self.WIN_SIZE = win_size
