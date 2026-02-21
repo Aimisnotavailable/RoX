@@ -1,5 +1,11 @@
 # scripts/ar.py
 from scripts.config import *
+import math
+import cv2
+import pygame
+import mediapipe as mp
+from collections import deque, namedtuple
+
 # --- PINCH DETECTOR ---
 HandState = namedtuple("HandState", ["pos_hist", "pinch_count", "is_pinched"])
 
@@ -61,6 +67,15 @@ class PinchDetector:
             "is_pinched": pinched
         }
 
+    def reset(self, label):
+        """
+        Reset the pinch state for a given hand label.
+        Clears pinch_count and is_pinched but preserves the position history deque.
+        """
+        if label in self.hands:
+            state = self.hands[label]
+            self.hands[label] = HandState(state.pos_hist, 0, False)
+
 
 # --- AR CLASS ---
 class AR:
@@ -86,12 +101,17 @@ class AR:
 
         # how many consecutive frames a hand must be absent before we consider it "long absent"
         self.absent_reset_threshold = HISTOGRAM_SIZE * 2
+        # shorter threshold specifically for resetting pinch state to avoid sticky pinches
+        self.pinch_absent_reset = max(3, HISTOGRAM_SIZE // 2)
 
         # ghost TTL default (frames). Each generated ghost entry gets this TTL and decrements each render.
         self.ghost_ttl_default = max(1, HISTOGRAM_SIZE // 2)
 
         # our new pinch detector
         self.detector = PinchDetector()
+
+        # diagnostic counters
+        self.frame_count = 0
 
     def _is_normalized(self, x, y):
         """Return True if coordinates look like normalized MediaPipe coords."""
@@ -111,23 +131,18 @@ class AR:
 
     def _valid_landmark(self, lm):
         """
-        Return True if landmark looks valid.
-        Some MediaPipe outputs can be (0,0) when missing; also use visibility if present.
+        Relaxed validity check:
+        - Accept landmarks unless they are non-finite.
+        - Treat exact (0,0) sentinel only if *all* landmarks are (0,0) (handled in render_hands).
+        - Use visibility only as a weak hint (very small threshold).
         """
         try:
             x = float(lm.x); y = float(lm.y)
         except Exception:
             return False
-        # reject exact zeros or near-zero normalized coords (common missing sentinel)
-        if abs(x) < 1e-6 and abs(y) < 1e-6:
+        if not (math.isfinite(x) and math.isfinite(y)):
             return False
-        # if visibility exists, require a minimal visibility
-        if hasattr(lm, 'visibility'):
-            try:
-                if lm.visibility is not None and float(lm.visibility) < 0.01:
-                    return False
-            except Exception:
-                pass
+        # visibility is a weak hint; don't reject solely on low visibility here
         return True
 
     def render_hands(self, surf, landmarks, label, is_generated=False):
@@ -139,10 +154,21 @@ class AR:
         """
         W, H = surf.get_width(), surf.get_height()
         pts = []
+        raw_landmarks = list(landmarks.landmark)
 
-        for lm in landmarks.landmark:
-            # skip invalid landmarks early
-            if not self._valid_landmark(lm):
+        # First pass: count how many landmarks pass _valid_landmark
+        valid_flags = [self._valid_landmark(lm) for lm in raw_landmarks]
+        valid_count = sum(1 for v in valid_flags if v)
+
+        # If no landmarks passed validity (rare), treat all as valid to avoid dropping frames
+        if valid_count == 0 and len(raw_landmarks) > 0:
+            # log once per frame for diagnostics
+            print(f"[AR] WARNING: no landmarks passed _valid_landmark for {label}; accepting all to avoid drop")
+            valid_flags = [True] * len(raw_landmarks)
+            valid_count = len(raw_landmarks)
+
+        for idx, lm in enumerate(raw_landmarks):
+            if not valid_flags[idx]:
                 continue
 
             # ensure numeric attributes
@@ -150,14 +176,14 @@ class AR:
                 lx = float(lm.x)
                 ly = float(lm.y)
             except Exception:
-                # skip malformed landmark
                 continue
 
             # If values look like normalized coords (0..1), convert to pixels.
             # If they are already >1, treat them as pixel coords.
             if self._is_normalized(lx, ly):
-                x_px = -lx * W + W
-                y_px =  ly * H
+                # standard mapping: left-to-right is lx*W; keep mirror if you prefer by flipping elsewhere
+                x_px = lx * W
+                y_px = ly * H
             else:
                 # already pixel coordinates (or ghost frames)
                 x_px = lx
@@ -172,8 +198,10 @@ class AR:
             try:
                 pygame.draw.circle(surf, (255,255,255), center=sanitized, radius=2)
             except TypeError:
-                # defensive: ensure integers
                 pygame.draw.circle(surf, (255,255,255), center=(int(sanitized[0]), int(sanitized[1])), radius=2)
+
+        # diagnostic print for render_hands
+        print(f"[AR] render_hands {label} pts_count={len(pts)} is_generated={is_generated}")
 
         # store as dict with source tag (store pixel coords only)
         entry = {
@@ -193,13 +221,11 @@ class AR:
                 hist.append(entry)
             else:
                 # prune trailing ghosts so ghosts stop immediately
-                # remove any trailing ghosts that might persist
                 while len(hist) > 0 and hist[-1].get("source") == "ghost":
                     popped = hist.pop()
                     get_logger_info('DEBUG', f'PRUNED TRAILING GHOST FOR {label} TTL={popped.get("ttl")}', True)
-                # append the real entry only if we have a reasonable number of points
-                # (avoid appending empty pts lists when landmarks were mostly invalid)
-                if len(pts) >= 5:  # require at least 5 valid landmarks to consider this a valid frame
+                # append the real entry if we have at least one point (avoid appending empty pts lists)
+                if len(pts) >= 1:
                     if len(hist) < HISTOGRAM_SIZE:
                         hist.append(entry)
                     else:
@@ -224,7 +250,6 @@ class AR:
 
         # draw connections (only if we have enough points)
         if pts:
-            # compute max index used in connections to avoid IndexError
             try:
                 max_idx = max(max(c) for c in self.mp_hands.HAND_CONNECTIONS)
             except Exception:
@@ -236,7 +261,6 @@ class AR:
                         pygame.draw.line(surf, (0,0,255),
                                          pts[a_idx], pts[b_idx], 1)
                     except Exception:
-                        # defensive: skip any problematic connection
                         continue
 
     def _decrement_and_prune_ghosts(self, label):
@@ -322,7 +346,16 @@ class AR:
             gen.add(x + velocity[0], y + velocity[1])
         return gen
 
+    def cvimage_to_pygame(self, image):
+        """Convert cv2 image into a pygame surface"""
+        # Get the image dimensions
+        size = image.shape[1::-1]
+        # Create a Pygame surface from the numpy array
+        pygame_surface = pygame.image.frombuffer(image.tobytes(), size, "RGB")
+        return pygame_surface
+
     def render(self, surf):
+        self.frame_count += 1
         ar_data = {
             "POSITION_DATA": {"LEFT": [], "RIGHT": []},
             "SCALE":         {"LEFT": 1,    "RIGHT": 1},
@@ -331,13 +364,27 @@ class AR:
             "HAND_PRESENCE" : False
         }
 
+        # quick camera sanity prints
+        print(f"[AR] cap.isOpened: {self.cap.isOpened()}")
+
         ret, frame = self.cap.read()
         if not ret:
+            print("[AR] cap.read failed")
             return ar_data
+        print(f"[AR] frame.shape: {getattr(frame, 'shape', None)}")
 
         # prep for Mediapipe
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         res = self.hands.process(rgb)
+        image = self.cvimage_to_pygame(rgb)
+        surf.blit(image, (surf.get_width() - image.get_width(), 0))
+        # diagnostic prints
+        print(f"[AR] FRAME {self.frame_count} Mediapipe hands: {bool(res.multi_hand_landmarks)}")
+        if res.multi_hand_landmarks:
+            for i, lm_set in enumerate(res.multi_hand_landmarks):
+                valid_count = sum(1 for lm in lm_set.landmark if self._valid_landmark(lm))
+                print(f"[AR]  hand {i} valid landmarks: {valid_count}")
+        print(f"[AR] presence_counter: {self.presence_counter} hands_tracker: {self.hands_tracker}")
 
         # keep track of which hands appear
         seen = []
@@ -356,6 +403,10 @@ class AR:
                 landmarks_norm = [(lm.x, lm.y) for lm in lm_set.landmark]
                 d = self.detector.update(label, landmarks_norm)
 
+                # If presence counter is low, force pinch off to avoid sticky clicks
+                if self.presence_counter[label] < self.presence_threshold_on:
+                    d["is_pinched"] = False
+
                 # 2) draw & update pixel histogram
                 # pass is_generated=False for real detections
                 self.render_hands(surf, lm_set, label, is_generated=False)
@@ -364,15 +415,19 @@ class AR:
                 # position data should be pixel-space pts from the last real entry
                 hist = self.position_histogram[label]
                 if hist:
-                    # ensure we return the most recent real pts if available
+                    # prefer most recent real pts
                     last_real = None
                     for e in reversed(hist):
-                        if e.get("source") == "real":
+                        if e.get("source") == "real" and e.get("pts"):
                             last_real = e["pts"]
                             break
-                    ar_data["POSITION_DATA"][label] = last_real if last_real is not None else hist[-1]["pts"]
+                    # fallback to last entry even if ghost or partial
+                    if last_real is None:
+                        last_real = hist[-1]["pts"]
+                    ar_data["POSITION_DATA"][label] = last_real
                 else:
-                    ar_data["POSITION_DATA"][label] = []
+                    # keep previous ar_data value (avoid overwriting with empty)
+                    pass
 
                 ar_data["SCALE"][label]         = d["scale"]
                 ar_data["CLICK_DIST"][label]    = d["rel_dist"]
@@ -381,9 +436,6 @@ class AR:
                 # determine HAND_PRESENCE using presence_counter hysteresis
                 if self.presence_counter[label] >= self.presence_threshold_on:
                     ar_data["HAND_PRESENCE"] = True
-                else:
-                    # leave as-is; other hand may set it true
-                    pass
 
                 # reset hands_tracker for this label (we saw a real hand)
                 self.hands_tracker[label] = 0
@@ -394,6 +446,31 @@ class AR:
                     self.hands_tracker[label] += 1
                     # decrement presence counter on missing frames
                     self.presence_counter[label] = max(self.presence_threshold_off, self.presence_counter[label] - 1)
+
+                    # If the hand has been missing for a while, reset pinch detector state and clear history
+                    if self.hands_tracker[label] >= self.absent_reset_threshold:
+                        if len(self.position_histogram[label]) > 0:
+                            get_logger_info('CORE', f'CLEARING HISTOGRAM FOR {label} DUE TO LONG ABSENCE {self.hands_tracker[label]}', True)
+                            self.position_histogram[label].clear()
+                        # reset pinch detector state for this hand to avoid sticky pinches
+                        try:
+                            self.detector.reset(label)
+                        except Exception:
+                            hs = self.detector.hands[label]
+                            self.detector.hands[label] = HandState(hs.pos_hist, 0, False)
+                        # ensure AR output flags are cleared
+                        ar_data["CLICK_FLAG"][label] = False
+                        ar_data["CLICK_DIST"][label] = 0
+                        ar_data["SCALE"][label] = 1
+
+                    # If the hand has been missing for pinch_absent_reset frames, reset pinch to avoid sticky pinches
+                    if self.hands_tracker[label] >= self.pinch_absent_reset:
+                        try:
+                            self.detector.reset(label)
+                        except Exception:
+                            hs = self.detector.hands[label]
+                            self.detector.hands[label] = HandState(hs.pos_hist, 0, False)
+                        ar_data["CLICK_FLAG"][label] = False
 
                     # only generate ghosts if we have at least one real base and haven't exceeded lifetime
                     if (len(self.position_histogram[label]) >= 1
@@ -407,7 +484,6 @@ class AR:
                     else:
                         # if we've been absent for a long time, ensure histogram is small
                         if self.hands_tracker[label] >= self.absent_reset_threshold:
-                            # clear old history to avoid persistent ghosts when hand reappears later
                             if len(self.position_histogram[label]) > 0:
                                 get_logger_info('CORE', f'CLEARING HISTOGRAM FOR {label} DUE TO LONG ABSENCE {self.hands_tracker[label]}', True)
                                 self.position_histogram[label].clear()
@@ -419,6 +495,20 @@ class AR:
                 # decrement presence counter on missing frames
                 self.presence_counter[label] = max(self.presence_threshold_off, self.presence_counter[label] - 1)
 
+                # If the hand has been missing for a while, reset pinch detector state and clear history
+                if self.hands_tracker[label] >= self.absent_reset_threshold:
+                    if len(self.position_histogram[label]) > 0:
+                        get_logger_info('CORE', f'CLEARING HISTOGRAM FOR {label} DUE TO LONG ABSENCE {self.hands_tracker[label]}', True)
+                        self.position_histogram[label].clear()
+                    try:
+                        self.detector.reset(label)
+                    except Exception:
+                        hs = self.detector.hands[label]
+                        self.detector.hands[label] = HandState(hs.pos_hist, 0, False)
+                    ar_data["CLICK_FLAG"][label] = False
+                    ar_data["CLICK_DIST"][label] = 0
+                    ar_data["SCALE"][label] = 1
+
                 # if we have recent history and haven't exceeded ghost lifetime, generate ghosts
                 if (len(self.position_histogram[label]) >= 1
                        and self.hands_tracker[label] < HISTOGRAM_SIZE):
@@ -428,5 +518,26 @@ class AR:
                 else:
                     ar_data["HAND_PRESENCE"] = False
                     # no hands detected at all
+
+        # Fallback visual smoke test
+        # If nothing is being drawn by render_hands, draw a visible fallback marker for each hand
+        for label in ("LEFT", "RIGHT"):
+            hist = self.position_histogram[label]
+            if hist:
+                last = None
+                for e in reversed(hist):
+                    if e.get("pts"):
+                        last = e["pts"]
+                        break
+                if last:
+                    try:
+                        color = (200, 80, 80) if label == "LEFT" else (80, 80, 200)
+                        p = last[WRIST_IDX] if len(last) > WRIST_IDX else last[0]
+                        pygame.draw.circle(surf, color, p, 10, 2)
+                        font = pygame.font.SysFont("Arial", 14)
+                        txt = font.render(f"{label} hist:{len(hist)}", True, color)
+                        surf.blit(txt, (max(0, p[0]-20), max(0, p[1]-30)))
+                    except Exception as e:
+                        print("[AR] fallback draw error", e)
 
         return ar_data
