@@ -21658,3 +21658,201 @@
 [ERROR] NO HANDS DETECTED
 [ERROR] NO HANDS DETECTED
 [ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[CORE ] RESETTING HISTOGRAM FOR LEFT AFTER LONG ABSENCE 11
+[GAME ] Right pinch released; camera pos [22.012376273641035, 11.893642904954813]
+[GAME ] Placed block at grid (2, 2) world (34.99648296803616, 34.998142220595795)
+[GAME ] Placed block at grid (1, 2) world (14.999524021483023, 33.99974857689814)
+[GAME ] Placed block at grid (-1, 2) world (-9.0000677194016, 29.99996422901161)
+[GAME ] Placed block at grid (-2, 2) world (-24.00000996128475, 31.99999473821397)
+[GAME ] Placed block at grid (-4, 2) world (-64.00000016785961, 28.999999911332587)
+[GAME ] Placed block at grid (-6, 2) world (-91.00000002021574, 25.99999998932157)
+[GAME ] Placed block at grid (-7, 1) world (-118.00000000302364, 22.999999998402842)
+[GAME ] Placed block at grid (-9, 1) world (-147.0000000004374, 9.999999999768947)
+[GAME ] Placed block at grid (-11, 0) world (-169.00000000006543, -1.0000000000345572)
+[GAME ] Placed block at grid (-10, 0) world (-160.00000000000136, -2.000000000000723)
+[GAME ] Placed block at grid (-9, 0) world (-142.00000000000017, 2.9999999999999076)
+[GAME ] Placed block at grid (-6, 1) world (-103.00000000000003, 12.999999999999986)
+[GAME ] Placed block at grid (-3, 2) world (-43.0, 36.0)
+[GAME ] Placed block at grid (-5, 2) world (-79.0, 24.0)
+[GAME ] Placed block at grid (-4, 3) world (-60.0, 41.0)
+[GAME ] Placed block at grid (-3, 3) world (-52.0, 45.0)
+[GAME ] Placed block at grid (-7, 2) world (-105.0, 30.0)
+[GAME ] Placed block at grid (-10, 1) world (-158.0, 19.0)
+[GAME ] Placed block at grid (-11, 1) world (-179.0, 18.0)
+[GAME ] Placed block at grid (-12, 1) world (-190.0, 20.0)
+[GAME ] Placed block at grid (-10, 2) world (-156.0, 24.0)
+[GAME ] Placed block at grid (-8, 2) world (-126.0, 27.0)
+[GAME ] Placed block at grid (-12, 2) world (-193.0, 26.0)
+[GAME ] Placed block at grid (-13, 1) world (-212.0, 20.0)
+[GAME ] Placed block at grid (-14, 1) world (-223.0, 18.0)
+[GAME ] Placed block at grid (-11, 3) world (-182.0, 44.0)
+[GAME ] Placed block at grid (-10, 4) world (-167.0, 57.0)
+[GAME ] Placed block at grid (-10, 3) world (-154.0, 55.0)
+[GAME ] Placed block at grid (-9, 3) world (-151.0, 44.0)
+[GAME ] Placed block at grid (-8, 0) world (-136.0, 2.0)
+[GAME ] Placed block at grid (-7, 3) world (-116.0, 42.0)
+[GAME ] Placed block at grid (-7, 4) world (-117.0, 58.0)
+[GAME ] Placed block at grid (-8, 1) world (-129.0, 16.0)
+[GAME ] Placed block at grid (-13, 0) world (-207.0, 8.0)
+[GAME ] Placed block at grid (-13, 2) world (-206.0, 24.0)
+[GAME ] Placed block at grid (-12, 0) world (-193.0, -1.0)
+[GAME ] Placed block at grid (-14, 0) world (-220.0, -5.0)
+[GAME ] Placed block at grid (-15, 0) world (-246.0, -3.0)
+[GAME ] Placed block at grid (-17, 0) world (-268.0, -2.0)
+[GAME ] Placed block at grid (-18, 0) world (-282.0, -4.0)
+[GAME ] Placed block at grid (-19, 0) world (-301.0, -3.0)
+[GAME ] Placed block at grid (-20, 0) world (-326.0, -4.0)
+[GAME ] Placed block at grid (-21, 0) world (-343.0, -8.0)
+[GAME ] Placed block at grid (-22, 0) world (-347.0, -7.0)
+[GAME ] Placed block at grid (-16, 0) world (-263.0, 8.0)
+[GAME ] Placed block at grid (-5, 0) world (-82.0, 8.0)
+[GAME ] Placed block at grid (-4, 0) world (-59.0, -2.0)
+[GAME ] Placed block at grid (-3, 0) world (-48.0, -7.0)
+[GAME ] Placed block at grid (-6, 0) world (-98.0, -8.0)
+[GAME ] Placed block at grid (-8, -1) world (-130.0, -10.0)
+[GAME ] Placed block at grid (-9, -1) world (-146.0, -10.0)
+[GAME ] Placed block at grid (-10, -1) world (-160.0, -10.0)
+[GAME ] Placed block at grid (-11, -1) world (-170.0, -13.0)
+[GAME ] Placed block at grid (-7, 0) world (-117.0, -4.0)
+[GAME ] Placed block at grid (-6, -1) world (-101.0, -10.0)
+[GAME ] Placed block at grid (-7, -1) world (-112.0, -9.0)
+[GAME ] Placed block at grid (-15, -1) world (-235.0, -10.0)
+[GAME ] Placed block at grid (-16, -1) world (-260.0, -10.0)
+[GAME ] Placed block at grid (-17, -1) world (-274.0, -9.0)
+[GAME ] Placed block at grid (-18, -1) world (-282.0, -11.0)
+[GAME ] Placed block at grid (-14, -1) world (-218.0, -12.0)
+[GAME ] Placed block at grid (-12, -1) world (-189.0, -10.0)
+[GAME ] Placed block at grid (-13, -1) world (-212.0, -9.0)
+[CORE ] APPENDED GHOST FOR LEFT TTL=2
+[CORE ] GENERATED HAND FRAMES FOR LEFT HAND_TRACKER=1
+[CORE ] APPENDED GHOST FOR LEFT TTL=2
+[CORE ] GENERATED HAND FRAMES FOR LEFT HAND_TRACKER=2
+[DEBUG] GHOST TTL EXPIRED FOR LEFT
+[DEBUG] PRUNED TRAILING GHOST FOR LEFT TTL=1
+[GAME ] Placed block at grid (-20, -2) world (-316.0, -24.0)
+[GAME ] Placed block at grid (-19, -1) world (-298.0, -23.0)
+[GAME ] Placed block at grid (-17, -2) world (-271.0, -28.0)
+[GAME ] Placed block at grid (-15, -2) world (-246.0, -24.0)
+[GAME ] Placed block at grid (-16, -2) world (-259.0, -27.0)
+[GAME ] Placed block at grid (-19, -2) world (-306.0, -33.0)
+[GAME ] Placed block at grid (-21, -2) world (-334.0, -38.0)
+[CORE ] APPENDED GHOST FOR LEFT TTL=2
+[CORE ] GENERATED HAND FRAMES FOR LEFT HAND_TRACKER=1
+[DEBUG] PRUNED TRAILING GHOST FOR LEFT TTL=1
+[GAME ] Placed block at grid (-19, -3) world (-304.0, -50.0)
+[GAME ] Right pinch released; camera pos [74.01587289051245, 56.984292380691976]
+[GAME ] Right pinch released; camera pos [45.658955713389425, 73.72422862258958]
+[GAME ] Right pinch released; camera pos [128.21289124954544, 25.92319331781432]
+[GAME ] Right pinch released; camera pos [128.7350678732967, 35.95461212788605]
+[GAME ] Right pinch released; camera pos [103.46602263054376, 31.520493155106397]
+[GAME ] Placed block at grid (-5, 5) world (-83.99999990092893, 86.99999999586515)
+[GAME ] Placed block at grid (-4, 4) world (-67.73794358245871, 57.27877271326048)
+[GAME ] Right pinch released; camera pos [104.00000009907109, 30.99999999586515]
+[GAME ] Placed block at grid (-5, 4) world (-76.31278312304926, 61.36684386130715)
+[GAME ] Placed block at grid (-6, 3) world (-102.50211727612569, 51.41504793493563)
+[GAME ] Placed block at grid (-5, 3) world (-85.1200304292922, 54.34691032409806)
+[GAME ] Placed block at grid (-2, 4) world (-33.66516311637119, 59.40158047467284)
+[GAME ] Placed block at grid (-1, 4) world (-21.636272472572514, 59.226545891761305)
+[GAME ] Placed block at grid (-1, 1) world (-22.046629855825387, 21.298102043279513)
+[CORE ] APPENDED GHOST FOR LEFT TTL=2
+[CORE ] GENERATED HAND FRAMES FOR LEFT HAND_TRACKER=1
+[CORE ] APPENDED GHOST FOR LEFT TTL=2
+[CORE ] GENERATED HAND FRAMES FOR LEFT HAND_TRACKER=2
+[DEBUG] GHOST TTL EXPIRED FOR LEFT
+[DEBUG] PRUNED TRAILING GHOST FOR LEFT TTL=1
+[CORE ] APPENDED GHOST FOR RIGHT TTL=2
+[CORE ] GENERATED HAND FRAMES FOR RIGHT HAND_TRACKER=1
+[ERROR] NO HANDS DETECTED
+[CORE ] APPENDED GHOST FOR LEFT TTL=2
+[CORE ] APPENDED GHOST FOR RIGHT TTL=2
+[DEBUG] GHOST TTL EXPIRED FOR RIGHT
+[DEBUG] PRUNED TRAILING GHOST FOR LEFT TTL=1
+[CORE ] APPENDED GHOST FOR RIGHT TTL=2
+[CORE ] GENERATED HAND FRAMES FOR RIGHT HAND_TRACKER=3
+[DEBUG] GHOST TTL EXPIRED FOR RIGHT
+[ERROR] NO HANDS DETECTED
+[CORE ] APPENDED GHOST FOR LEFT TTL=2
+[CORE ] APPENDED GHOST FOR RIGHT TTL=2
+[DEBUG] GHOST TTL EXPIRED FOR RIGHT
+[ERROR] NO HANDS DETECTED
+[CORE ] APPENDED GHOST FOR LEFT TTL=2
+[DEBUG] GHOST TTL EXPIRED FOR LEFT
+[DEBUG] GHOST TTL EXPIRED FOR RIGHT
+[ERROR] NO HANDS DETECTED
+[CORE ] APPENDED GHOST FOR LEFT TTL=2
+[DEBUG] GHOST TTL EXPIRED FOR LEFT
+[ERROR] NO HANDS DETECTED
+[CORE ] APPENDED GHOST FOR LEFT TTL=2
+[DEBUG] GHOST TTL EXPIRED FOR LEFT
+[ERROR] NO HANDS DETECTED
+[DEBUG] GHOST TTL EXPIRED FOR LEFT
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[CORE ] CLEARING HISTOGRAM FOR RIGHT DUE TO LONG ABSENCE 10
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[CORE ] CLEARING HISTOGRAM FOR LEFT DUE TO LONG ABSENCE 10
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
+[ERROR] NO HANDS DETECTED
