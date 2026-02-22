@@ -3,8 +3,7 @@ import moderngl
 import sys
 import glm
 from PIL import Image
-from src.rtscamera import RTSCamera
-from src.fpscamera import FPSCamera 
+from src.camera import FPSCamera, RTSCamera
 from src.mesh import CubeMesh
 from src.builder import VoxelBuilder
 from src.quad import ScreenQuad  # <--- NEW

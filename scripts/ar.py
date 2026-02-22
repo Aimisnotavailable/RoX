@@ -163,7 +163,7 @@ class AR:
         # If no landmarks passed validity (rare), treat all as valid to avoid dropping frames
         if valid_count == 0 and len(raw_landmarks) > 0:
             # log once per frame for diagnostics
-            print(f"[AR] WARNING: no landmarks passed _valid_landmark for {label}; accepting all to avoid drop")
+            get_logger_info('DEBUG',f"[AR] WARNING: no landmarks passed _valid_landmark for {label}; accepting all to avoid drop")
             valid_flags = [True] * len(raw_landmarks)
             valid_count = len(raw_landmarks)
 
@@ -201,7 +201,7 @@ class AR:
                 pygame.draw.circle(surf, (255,255,255), center=(int(sanitized[0]), int(sanitized[1])), radius=2)
 
         # diagnostic print for render_hands
-        print(f"[AR] render_hands {label} pts_count={len(pts)} is_generated={is_generated}")
+        get_logger_info('DEBUG', f"[AR] render_hands {label} pts_count={len(pts)} is_generated={is_generated}")
 
         # store as dict with source tag (store pixel coords only)
         entry = {
@@ -365,13 +365,13 @@ class AR:
         }
 
         # quick camera sanity prints
-        print(f"[AR] cap.isOpened: {self.cap.isOpened()}")
+        get_logger_info('DEBUG', f"[AR] cap.isOpened: {self.cap.isOpened()}")
 
         ret, frame = self.cap.read()
         if not ret:
-            print("[AR] cap.read failed")
+            get_logger_info('DEBUG', "[AR] cap.read failed")
             return ar_data
-        print(f"[AR] frame.shape: {getattr(frame, 'shape', None)}")
+        get_logger_info('DEBUG', f"[AR] frame.shape: {getattr(frame, 'shape', None)}")
 
         # prep for Mediapipe
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -379,12 +379,12 @@ class AR:
         image = self.cvimage_to_pygame(rgb)
         surf.blit(image, (surf.get_width() - image.get_width(), 0))
         # diagnostic prints
-        print(f"[AR] FRAME {self.frame_count} Mediapipe hands: {bool(res.multi_hand_landmarks)}")
+        get_logger_info('DEBUG', f"[AR] FRAME {self.frame_count} Mediapipe hands: {bool(res.multi_hand_landmarks)}")
         if res.multi_hand_landmarks:
             for i, lm_set in enumerate(res.multi_hand_landmarks):
                 valid_count = sum(1 for lm in lm_set.landmark if self._valid_landmark(lm))
-                print(f"[AR]  hand {i} valid landmarks: {valid_count}")
-        print(f"[AR] presence_counter: {self.presence_counter} hands_tracker: {self.hands_tracker}")
+                get_logger_info('DEBUG', f"[AR]  hand {i} valid landmarks: {valid_count}")
+        get_logger_info('DEBUG', f"[AR] presence_counter: {self.presence_counter} hands_tracker: {self.hands_tracker}")
 
         # keep track of which hands appear
         seen = []
@@ -538,6 +538,6 @@ class AR:
                         txt = font.render(f"{label} hist:{len(hist)}", True, color)
                         surf.blit(txt, (max(0, p[0]-20), max(0, p[1]-30)))
                     except Exception as e:
-                        print("[AR] fallback draw error", e)
+                        get_logger_info('CORE', f"[AR] fallback draw error {e}")
 
         return ar_data

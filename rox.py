@@ -9,4 +9,6 @@ class RoX:
     def __init__(self, type = "2D"):
         self.type = type
         self.engine = GraphicsEngine2D() if self.type == "2D" else GraphicsEngine3D()
-        
+
+    def run(self):
+        self.engine.run()

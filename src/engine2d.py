@@ -1,120 +1,18 @@
 # game_main.py
 from scripts.config import *
 from scripts.ar import AR
-import pygame
-import sys
-import math
-import time
-
-# TUNABLES
-PLACEMENT_COOLDOWN = 0.1
-PLACEMENT_MIN_MOVE = 4.0
-PINCH_STABLE_TIME = 0.06
-MIN_SCREEN_BLOCK_SIZE = 2
-ZOOM_MIN = 0.25
-ZOOM_MAX = 4.0
-
-# Block visuals
-BLOCK_VISUAL_SCALE = 1.0
-BLOCK_VISUAL_SCALE_ALLOW_OVERLAP = False
-
-# Finger smoothing
-FINGER_EMA_ALPHA = 0.45
-
-# Camera pan interpolation
-DEADZONE_PX = 6
-SMOOTH_TAU = 0.06
-INSTANT_STOP = False
-MAX_STEP_WORLD = 10000.0
-
-# Brightside lighting defaults
-BRIGHTSIDE_DEFAULT = True
-LIGHT_DIR = (-0.6, -0.4)        # screen-space light direction (x,y)
-HIGHLIGHT_INTENSITY = 0.28
-SHADOW_INTENSITY = 0.12
-
-# Helper classes
-class HandActionState:
-    def __init__(self):
-        self.prev_pinched = False
-        self.pinched_since = None
-        self.start_pos = None
-        self.start_screen = None
-        self.start_cam = None
-        self.start_zoom = None
-        self.stable = False
-        self._tentative_start = None
-
-    def update(self, is_pinched, pos_world, screen_px, cam_pos, cam_zoom, t_now):
-        rising = False
-        falling = False
-
-        if is_pinched:
-            if not self.prev_pinched:
-                self.pinched_since = t_now
-                self.prev_pinched = True
-                self.stable = False
-                self._tentative_start = (pos_world, screen_px, (cam_pos[0], cam_pos[1]), cam_zoom)
-            else:
-                if not self.stable and self.pinched_since is not None and (t_now - self.pinched_since) >= PINCH_STABLE_TIME:
-                    rising = True
-                    self.stable = True
-                    if self._tentative_start is not None:
-                        self.start_pos, self.start_screen, self.start_cam, self.start_zoom = self._tentative_start
-                        self._tentative_start = None
-                    else:
-                        self.start_pos = pos_world
-                        self.start_screen = screen_px
-                        self.start_cam = (cam_pos[0], cam_pos[1])
-                        self.start_zoom = cam_zoom
-        else:
-            if self.prev_pinched:
-                if self.stable:
-                    falling = True
-                self.prev_pinched = False
-                self.pinched_since = None
-                self.start_pos = None
-                self.start_screen = None
-                self.start_cam = None
-                self.start_zoom = None
-                self.stable = False
-                self._tentative_start = None
-
-        return rising, falling, self.stable
-
-class Camera:
-    def __init__(self, pos=(0.0,0.0), zoom=1.0, angle=0.0):
-        self.pos = [float(pos[0]), float(pos[1])]
-        self.zoom = float(zoom)
-        self.angle = float(angle)
-
-    def screen_to_world(self, sx, sy, screen_w, screen_h):
-        cx, cy = screen_w/2.0, screen_h/2.0
-        dx = (sx - cx) / self.zoom
-        dy = (sy - cy) / self.zoom
-        cos_a = math.cos(-self.angle)
-        sin_a = math.sin(-self.angle)
-        wx = cos_a*dx - sin_a*dy + self.pos[0]
-        wy = sin_a*dx + cos_a*dy + self.pos[1]
-        return (wx, wy)
-
-    def world_to_screen(self, wx, wy, screen_w, screen_h):
-        cx, cy = screen_w/2.0, screen_h/2.0
-        dx = wx - self.pos[0]
-        dy = wy - self.pos[1]
-        cos_a = math.cos(self.angle)
-        sin_a = math.sin(self.angle)
-        sx = cos_a*dx - sin_a*dy
-        sy = sin_a*dx + cos_a*dy
-        return (int(sx*self.zoom + cx), int(sy*self.zoom + cy))
-
-    def clamp_zoom(self, min_z=ZOOM_MIN, max_z=ZOOM_MAX):
-        self.zoom = max(min_z, min(max_z, self.zoom))
+from src.handstateaction import HandActionState
+from src.camera import Camera2D
 
 class BlockWorld:
     def __init__(self, grid_size=32):
         self.grid_size = grid_size
         self.blocks = set()
+
+        for x in range(100):
+            for y in range(100):
+                if random.randint(0, 8) == 4:
+                    self.blocks.add((x, y))
 
     def world_to_grid(self, wx, wy):
         gx = int(round(wx / self.grid_size))
@@ -195,7 +93,7 @@ class GraphicsEngine2D:
         self.delta_time = 0.0
 
         self.block_world = BlockWorld(grid_size=BLOCK_SIZE)
-        self.camera = Camera(pos=(0.0, 0.0), zoom=1.0, angle=0.0)
+        self.camera = Camera2D(pos=(0.0, 0.0), zoom=1.0, angle=0.0)
 
         self.left_state = HandActionState()
         self.right_state = HandActionState()

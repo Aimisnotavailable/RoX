@@ -3,6 +3,9 @@ import cv2
 import mediapipe as mp
 import pygame
 import sys
+import random
+import time
+import glm
 
 from collections import deque, namedtuple
 from scripts.logger import get_logger_info
@@ -35,3 +38,30 @@ ATTACK_COOLDOWN = 20
 
 # 2D CONFIGS -----------------------
 BLOCK_SIZE = 16
+
+# TUNABLES
+PLACEMENT_COOLDOWN = 0.1
+PLACEMENT_MIN_MOVE = 4.0
+PINCH_STABLE_TIME = 0.06
+MIN_SCREEN_BLOCK_SIZE = 2
+ZOOM_MIN = 0.25
+ZOOM_MAX = 4.0
+
+# Block visuals
+BLOCK_VISUAL_SCALE = 1.0
+BLOCK_VISUAL_SCALE_ALLOW_OVERLAP = False
+
+# Finger smoothing
+FINGER_EMA_ALPHA = 0.45
+
+# Camera pan interpolation
+DEADZONE_PX = 6
+SMOOTH_TAU = 0.06
+INSTANT_STOP = False
+MAX_STEP_WORLD = 10000.0
+
+# Brightside lighting defaults
+BRIGHTSIDE_DEFAULT = True
+LIGHT_DIR = (-0.6, -0.4)        # screen-space light direction (x,y)
+HIGHLIGHT_INTENSITY = 0.28
+SHADOW_INTENSITY = 0.12

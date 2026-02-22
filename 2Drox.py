@@ -5,4 +5,4 @@ class RoX2D(RoX):
     def __init__(self):
         super().__init__("2D")
 
-RoX2D().engine.run()
+RoX2D().run()
