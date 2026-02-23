@@ -9,6 +9,8 @@ from src.builder import VoxelBuilder
 from src.quad import ScreenQuad  # <--- NEW
 from src.builder import BLOCK_TYPES
 
+from scripts.ar import AR
+
 class GraphicsEngine3D:
     def __init__(self, win_size=(1280, 720)):
         pygame.init()
@@ -61,6 +63,10 @@ class GraphicsEngine3D:
         # Controls
         self.clicking = False
         self.delay = 0
+        
+        # AR
+        self.ar = AR()
+        self.ar_surf = pygame.Surface(self.WIN_SIZE, pygame.SRCALPHA)
 
     def switch_camera_mode(self):
         """
@@ -179,9 +185,15 @@ class GraphicsEngine3D:
         text_surf = self.font.render(f"Selected: {block_name}", True, (255, 255, 255))
         self.ui_surface.blit(text_surf, (20, 100))
 
+        self.ar_surf.fill((0, 0, 0, 0))
+        self.ar.render(self.ar_surf)
+
         # 4. Upload this surface data to the GPU Texture
         # We must flip it because OpenGL expects bottom-left origin
         flipped_data = pygame.image.tostring(pygame.transform.flip(self.ui_surface, False, True), 'RGBA')
+        self.ui_texture.write(flipped_data)
+
+        flipped_data = pygame.image.tostring(pygame.transform.flip(self.ar_surf, False, True), 'RGBA')
         self.ui_texture.write(flipped_data)
 
     def update(self):
