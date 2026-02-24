@@ -8,7 +8,7 @@ from src.mesh import CubeMesh
 from src.builder import VoxelBuilder
 from src.quad import ScreenQuad  # <--- NEW
 from src.builder import BLOCK_TYPES
-
+from src.handstateaction import HandActionState
 from scripts.ar import AR
 
 class GraphicsEngine3D:
@@ -67,6 +67,8 @@ class GraphicsEngine3D:
         # AR
         self.ar = AR()
         self.ar_surf = pygame.Surface(self.WIN_SIZE, pygame.SRCALPHA)
+        self.right_state = HandActionState()
+        self.left_state = HandActionState()
 
     def switch_camera_mode(self):
         """
@@ -94,7 +96,12 @@ class GraphicsEngine3D:
             pygame.event.set_grab(True)
             pygame.mouse.set_visible(False)
 
+    def convert_hand_inputs_to_world_inputs(self):
+        pass
 
+    def handle_actions(self):
+        pass
+    
     def load_program(self, path):
         # Helper to load shaders easily
         with open(f'{path}.vert') as f: vertex_src = f.read()
