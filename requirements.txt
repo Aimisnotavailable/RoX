@@ -5,6 +5,6 @@ numpy
 pandas
 screeninfo
 colorama
-moderngl==5.8.2
-pyglm==2.7.0
-Pillow==10.2.0
+moderngl
+pyglm
+Pillow
