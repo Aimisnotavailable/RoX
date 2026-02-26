@@ -195,13 +195,15 @@ class GraphicsEngine3D:
         self.ar_surf.fill((0, 0, 0, 0))
         self.ar.render(self.ar_surf)
 
+        flipped_data = pygame.image.tostring(pygame.transform.flip(self.ar_surf, False, True), 'RGBA')
+        self.ui_texture.write(flipped_data)
+
         # 4. Upload this surface data to the GPU Texture
         # We must flip it because OpenGL expects bottom-left origin
         flipped_data = pygame.image.tostring(pygame.transform.flip(self.ui_surface, False, True), 'RGBA')
         self.ui_texture.write(flipped_data)
 
-        flipped_data = pygame.image.tostring(pygame.transform.flip(self.ar_surf, False, True), 'RGBA')
-        self.ui_texture.write(flipped_data)
+
 
     def update(self):
         self.camera.update()

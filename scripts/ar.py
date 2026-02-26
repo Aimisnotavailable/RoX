@@ -376,8 +376,10 @@ class AR:
         # prep for Mediapipe
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         res = self.hands.process(rgb)
-        image = self.cvimage_to_pygame(rgb)
-        surf.blit(image, (surf.get_width() - image.get_width(), 0))
+        
+        # image = self.cvimage_to_pygame(rgb)
+        # surf.blit(image, (surf.get_width() - image.get_width(), 0))
+
         # diagnostic prints
         get_logger_info('DEBUG', f"[AR] FRAME {self.frame_count} Mediapipe hands: {bool(res.multi_hand_landmarks)}")
         if res.multi_hand_landmarks:
