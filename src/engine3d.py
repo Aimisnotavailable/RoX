@@ -56,6 +56,7 @@ class GraphicsEngine3D:
         
         # SURFACES & TEXTURES
         self.ui_surface = pygame.Surface(self.WIN_SIZE, flags=pygame.SRCALPHA)
+        self.feed_surface = pygame.Surface(self.WIN_SIZE, pygame.SRCALPHA)
         self.ui_texture = self.ctx.texture(self.WIN_SIZE, 4)
         self.feed_texture = self.ctx.texture(self.WIN_SIZE, 3)
 
@@ -343,8 +344,8 @@ class GraphicsEngine3D:
     
     def render_feed_to_texture(self):
         if self.ar.image:
-            img_scaled = pygame.transform.scale(self.ar.image, self.WIN_SIZE)
-            img_flipped = pygame.transform.flip(img_scaled, False, True)
+            self.feed_surface.blit(self.ar.image, (0, 0))
+            img_flipped = pygame.transform.flip(self.feed_surface, False, True)
             data = pygame.image.tostring(img_flipped, 'RGB')
             self.feed_texture.write(data)
 

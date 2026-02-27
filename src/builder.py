@@ -1,10 +1,8 @@
-# builder.py
 import glm
 import pygame
 import math
 
 # --- Block Definitions ---
-# Format: ID, Name, (Bottom, Side, Top) texture layers
 BLOCK_TYPES = [
     {"id": 1, "name": "Sand",  "layers": (3, 4, 5)},
     {"id": 2, "name": "Grass", "layers": (6, 7, 8)},
@@ -18,44 +16,37 @@ BLOCK_TYPES = [
 class VoxelBuilder:
     def __init__(self, app):
         self.app = app
-
-        # Local/model-space voxel dictionary: (x,y,z) -> block_id
         self.cubes = {
             (0, 0, 0): 1,
             (1, 0, 0): 2,
             (-1, 0, 0): 3,
         }
-
-        # Visual transform of the whole builder (applied when rendering)
         self.scale = 1.0
-        self.rotation = glm.vec2(0.0, 0.0)  # (x, y) rotation angles in radians
+        self.rotation = glm.vec2(0.0, 0.0) 
 
-        # Interaction state (all positions are in local/model voxel coordinates)
-        self.hovered_block = None   # block under cursor in DELETE mode (local coords)
-        self.place_pos = None       # where a block would be placed (local coords)
-        self.delete_pos = None      # which block would be deleted (local coords)
-        self.mode = 'BUILD'         # 'BUILD' or 'DELETE'
+        self.hovered_block = None   
+        self.place_pos = None       
+        self.delete_pos = None      
+        self.mode = 'BUILD'         
 
-        # Block selection
-        self.current_block_index = 1  # index into BLOCK_TYPES
-
-        # Texture atlas config (example)
+        self.current_block_index = 1  
         self.atlas_rows = 2
         self.atlas_cols = 2
-
-        # Voxel center offset for alignment
         self.voxel_center_offset = glm.vec3(0.0, 0.0, 0.0)
 
-        # Debug flags
         self.debug_draw = False
         self.snap_axis = (0, 0)
         self._snapped_place_pos = (0, 0, 0)
         self.stop_raycast = False
         self.sensitivity = 0.2
+        
+        # New: Neighbors offset list for fast checking
+        self.neighbor_offsets = [
+            (1,0,0), (-1,0,0), 
+            (0,1,0), (0,-1,0), 
+            (0,0,1), (0,0,-1)
+        ]
 
-    # -------------------------
-    # Model matrix used for rendering
-    # -------------------------
     def get_model_matrix(self):
         model = glm.mat4(1.0)
         model = glm.rotate(model, self.rotation.y, glm.vec3(0.0, 1.0, 0.0))
@@ -63,84 +54,46 @@ class VoxelBuilder:
         model = glm.scale(model, glm.vec3(self.scale))
         return model
 
-    # -------------------------
-    # World <-> Model ray helpers
-    # -------------------------
     def world_to_model_ray(self, origin, direction):
-        """
-        Transform a world-space ray into model/local space using the inverse model matrix.
-        """
         model = self.get_model_matrix()
         inv_model = glm.inverse(model)
-
-        # Transform origin as position (w = 1)
         o4 = glm.vec4(origin.x, origin.y, origin.z, 1.0)
         local_o4 = inv_model * o4
         local_origin = glm.vec3(local_o4.x, local_o4.y, local_o4.z)
-
-        # Transform direction as vector (w = 0)
         d4 = glm.vec4(direction.x, direction.y, direction.z, 0.0)
         local_d4 = inv_model * d4
         local_direction = glm.normalize(glm.vec3(local_d4.x, local_d4.y, local_d4.z))
-
         return local_origin, local_direction
 
     def model_to_world_pos(self, local_pos):
-        """
-        Convert a local voxel coordinate to world-space position.
-        """
         model = self.get_model_matrix()
         p4 = glm.vec4(local_pos[0], local_pos[1], local_pos[2], 1.0)
         w4 = model * p4
         return glm.vec3(w4.x, w4.y, w4.z)
 
-    # -------------------------
-    # 2D Screen -> RTS RAY
-    # -------------------------
     def get_rts_ray(self, screen_pos=None):
-        """
-        Returns (origin, direction) in world space for the current mouse OR hand position.
-        Accepts optional screen_pos (x, y) for AR hand integration.
-        """
         if screen_pos is None:
             _x, _y = pygame.mouse.get_pos()
         else:
-            _x, _y = screen_pos  # Use the AR hand coordinates
-
+            _x, _y = screen_pos
         width, height = self.app.WIN_SIZE
-
-        # Normalized Device Coordinates
         x = (2.0 * _x) / width - 1.0
         y = 1.0 - (2.0 * _y) / height
-
         clip_coords = glm.vec4(x, y, -1.0, 1.0)
         eye_coords = glm.inverse(self.app.camera.m_proj) * clip_coords
         eye_coords = glm.vec4(eye_coords.x, eye_coords.y, -1.0, 0.0)
-
         world_ray = glm.inverse(self.app.camera.m_view) * eye_coords
         ray_direction = glm.normalize(glm.vec3(world_ray))
-        
         return self.app.camera.position, ray_direction
 
-    # -------------------------
-    # Raycast entry points
-    # -------------------------
     def raycast_fps(self, origin, direction):
         self.raycast_generic(origin, direction, is_rts=False)
 
     def raycast_rts(self, origin, direction):
         self.raycast_generic(origin, direction, is_rts=True)
 
-    # -------------------------
-    # Voxel traversal (Amanatides-Woo DDA)
-    # -------------------------
     def raycast_generic(self, origin, direction, is_rts=False):
-        """
-        Sets self.delete_pos and self.place_pos (both in local voxel coords) or None.
-        """
         direction = glm.normalize(direction)
-
-        # Small epsilon to avoid self-intersection
         eps = 1e-6
         origin = glm.vec3(origin.x + direction.x * eps,
                           origin.y + direction.y * eps,
@@ -158,20 +111,14 @@ class VoxelBuilder:
         t_delta_y = abs(1.0 / direction.y) if abs(direction.y) > 1e-12 else 1e30
         t_delta_z = abs(1.0 / direction.z) if abs(direction.z) > 1e-12 else 1e30
 
-        if step_x > 0:
-            t_max_x = (x + 1.0 - origin.x) * t_delta_x
-        else:
-            t_max_x = (origin.x - x) * t_delta_x
+        if step_x > 0: t_max_x = (x + 1.0 - origin.x) * t_delta_x
+        else:          t_max_x = (origin.x - x) * t_delta_x
 
-        if step_y > 0:
-            t_max_y = (y + 1.0 - origin.y) * t_delta_y
-        else:
-            t_max_y = (origin.y - y) * t_delta_y
+        if step_y > 0: t_max_y = (y + 1.0 - origin.y) * t_delta_y
+        else:          t_max_y = (origin.y - y) * t_delta_y
 
-        if step_z > 0:
-            t_max_z = (z + 1.0 - origin.z) * t_delta_z
-        else:
-            t_max_z = (origin.z - z) * t_delta_z
+        if step_z > 0: t_max_z = (z + 1.0 - origin.z) * t_delta_z
+        else:          t_max_z = (origin.z - z) * t_delta_z
 
         max_dist = 60.0 if is_rts else 8.0
         last_pos = None
@@ -213,41 +160,25 @@ class VoxelBuilder:
         self.place_pos = None
         self.delete_pos = None
 
-    # -------------------------
-    # Input handling
-    # -------------------------
     def handle_click(self):
-        """
-        Place or delete blocks.
-        """
-        # --- Mouse/Raycast Snapping Logic ---
-        # Only applies if we are 'holding' the click in RTS mode
         if self.app.is_rts_mode and self.stop_raycast and self.place_pos is not None:
             pos = [float(self.place_pos[0]), float(self.place_pos[1]), float(self.place_pos[2])]
-            
-            # Note: For AR, movement_rel might be 0, so this fine-tune snapping
-            # might not work perfectly without AR delta injection, but basic placement works.
             rel_x, rel_y = self.app.camera.movement_rel
 
             if getattr(self, 'snap_axis', None) is not None:
                 axis, sign = self.snap_axis
-                if axis == 0:
-                    delta = -rel_x * self.sensitivity
-                elif axis == 1:
-                    delta = rel_y * self.sensitivity
-                else:
-                    delta = -rel_y * self.sensitivity
+                if axis == 0: delta = -rel_x * self.sensitivity
+                elif axis == 1: delta = rel_y * self.sensitivity
+                else: delta = -rel_y * self.sensitivity
                 pos[axis] -= delta * sign
 
             snapped = [round(p) for p in pos]
             self.place_pos = glm.vec3(pos[0], pos[1], pos[2])
             self._snapped_place_pos = tuple(int(v) for v in snapped)
 
-        # --- Actual Block Placement ---
         if self.mode == 'BUILD' and self.place_pos:
             if self.delete_pos is not None or (self.delete_pos is None and self.place_pos[1] == 1):
                 block_data = BLOCK_TYPES[self.current_block_index]
-                
                 if hasattr(self, '_snapped_place_pos') and self.app.is_rts_mode:
                     place_pos_int = self._snapped_place_pos
                 else:
@@ -263,43 +194,25 @@ class VoxelBuilder:
     def toggle_mode(self):
         self.mode = 'DELETE' if self.mode == 'BUILD' else 'BUILD'
 
-    # -------------------------
-    # Update loop
-    # -------------------------
     def update(self, screen_pos=None):
-        """
-        Accepts optional screen_pos (x,y) to drive the RTS ray from AR hands.
-        """
         keys = pygame.key.get_pressed()
-
-        # Rotation and scale controls
         speed = 2.0 * self.app.delta_time * 0.001
-        if keys[pygame.K_LEFT]:
-            self.rotation.y -= speed
-        if keys[pygame.K_RIGHT]:
-            self.rotation.y += speed
-        if keys[pygame.K_UP]:
-            self.rotation.x -= speed
-        if keys[pygame.K_DOWN]:
-            self.rotation.x += speed
-        if keys[pygame.K_z]:
-            self.scale += speed * 0.5
-        if keys[pygame.K_x]:
-            self.scale = max(0.1, self.scale - speed * 0.5)
+        if keys[pygame.K_LEFT]: self.rotation.y -= speed
+        if keys[pygame.K_RIGHT]: self.rotation.y += speed
+        if keys[pygame.K_UP]: self.rotation.x -= speed
+        if keys[pygame.K_DOWN]: self.rotation.x += speed
+        if keys[pygame.K_z]: self.scale += speed * 0.5
+        if keys[pygame.K_x]: self.scale = max(0.1, self.scale - speed * 0.5)
 
         title = f"RoX | Mode: {self.mode} | Block ID: {self.current_block_index} | FPS: {int(self.app.clock.get_fps())}"
         pygame.display.set_caption(title)
 
-        # Choose Raycast Strategy based on Engine Mode
         if self.app.is_rts_mode:
-            # Pass screen_pos (Hand) or None (Mouse) to the ray calculator
             ray_origin_world, ray_direction_world = self.get_rts_ray(screen_pos)
-            
             local_origin, local_direction = self.world_to_model_ray(ray_origin_world, ray_direction_world)
             if not self.stop_raycast:
                 self.raycast_rts(local_origin, local_direction)
         else:
-            # FPS uses camera forward
             ray_origin_world = self.app.camera.position
             ray_direction_world = self.app.camera.forward
             local_origin, local_direction = self.world_to_model_ray(ray_origin_world, ray_direction_world)
@@ -310,11 +223,19 @@ class VoxelBuilder:
         else:
             self.hovered_block = None
 
-    def get_uv_offset(self, block_id):
-        col = block_id % self.atlas_cols
-        row = block_id // self.atlas_cols
-        step = 1.0 / self.atlas_cols
-        return glm.vec2(col * step, row * step)
+    def is_exposed(self, pos):
+        """
+        PERFORMANCE OPTIMIZATION:
+        Returns True if the block at 'pos' has at least one face exposed to air.
+        Returns False if fully surrounded (occluded).
+        """
+        x, y, z = pos
+        # Check all 6 neighbors. If any neighbor is MISSING from self.cubes, 
+        # then this face is exposed, so the block must be rendered.
+        for dx, dy, dz in self.neighbor_offsets:
+            if (x + dx, y + dy, z + dz) not in self.cubes:
+                return True
+        return False
 
     def render(self):
         base_model = self.get_model_matrix()
@@ -327,6 +248,11 @@ class VoxelBuilder:
         self.app.prog['is_wireframe'].value = 0
 
         for pos, block_id in self.cubes.items():
+            # --- CULLING CHECK ---
+            if not self.is_exposed(pos):
+                continue
+            # ---------------------
+
             data = next((b for b in BLOCK_TYPES if b['id'] == block_id), BLOCK_TYPES[0])
 
             if self.mode == 'DELETE' and pos == self.hovered_block:
@@ -341,7 +267,12 @@ class VoxelBuilder:
             data = BLOCK_TYPES[self.current_block_index]
 
             self.app.prog['is_ghost'].value = 1
-            self.app.prog['objectColor'].write(glm.vec3(1.0, 1.0, 1.0))
+            
+            # --- PULSE EFFECT ---
+            # Using absolute time to create a sine wave pulse (0.5 to 1.0)
+            pulse = (math.sin(pygame.time.get_ticks() * 0.005) + 1.0) * 0.25 + 0.5
+            self.app.prog['objectColor'].write(glm.vec3(pulse, pulse, pulse))
+            # --------------------
 
             ghost_pos = (self.place_pos[0] + self.voxel_center_offset.x,
                          self.place_pos[1] + self.voxel_center_offset.y,
@@ -350,7 +281,7 @@ class VoxelBuilder:
 
             self.app.prog['is_ghost'].value = 0
 
-        # 3. BUILD CURSOR
+        # 3. BUILD CURSOR (Wireframe)
         if self.mode == 'BUILD' and self.place_pos:
             self.app.prog['is_wireframe'].value = 1
 
