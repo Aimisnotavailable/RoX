@@ -1,17 +1,23 @@
-# game_main.py
+import pygame
+import sys
+import random
+import math
+import time
+
+from src.arinput import ARInputHandler 
 from scripts.config import *
 from scripts.ar import AR
-from src.handstateaction import HandActionState
 from src.camera import Camera2D
 
 class BlockWorld:
     def __init__(self, grid_size=32):
         self.grid_size = grid_size
         self.blocks = set()
-
-        for x in range(100):
-            for y in range(100):
-                if random.randint(0, 8) == 4:
+        
+        # Create some random initial blocks
+        for x in range(20):
+            for y in range(20):
+                if random.random() < 0.1: 
                     self.blocks.add((x, y))
 
     def world_to_grid(self, wx, wy):
@@ -25,305 +31,175 @@ class BlockWorld:
             return False
         self.blocks.add((gx, gy))
         return True
-
-    @staticmethod
-    def _shade_color(color, amount):
-        r = max(0, min(255, int(round(color[0] * (1 + amount)))))
-        g = max(0, min(255, int(round(color[1] * (1 + amount)))))
-        b = max(0, min(255, int(round(color[2] * (1 + amount)))))
-        return (r, g, b)
-
-    def draw(self, surf, camera, screen_size, visual_scale=1.0, brightside=True, light_dir=(-0.6, -0.4)):
-        sw, sh = screen_size
-        lx, ly = light_dir
-        mag = math.hypot(lx, ly)
-        if mag == 0:
-            lx, ly = -0.6, -0.4
-            mag = math.hypot(lx, ly)
-        lx /= mag; ly /= mag
-
-        for (gx, gy) in self.blocks:
-            wx = gx * self.grid_size
-            wy = gy * self.grid_size
-            sx, sy = camera.world_to_screen(wx, wy, sw, sh)
-            size = int(round(self.grid_size * camera.zoom * visual_scale))
-            if size < MIN_SCREEN_BLOCK_SIZE:
-                continue
-            rect = pygame.Rect(sx - size//2, sy - size//2, size, size)
-
-            base_color = (50, 200, 50)
-            if brightside:
-                highlight = self._shade_color(base_color, HIGHLIGHT_INTENSITY)
-                shadow = self._shade_color(base_color, -SHADOW_INTENSITY)
-                pygame.draw.rect(surf, base_color, rect)
-                t = max(1, int(round(size * 0.18)))
-                if lx < 0:
-                    left_rect = pygame.Rect(rect.left, rect.top, t, rect.height)
-                    right_rect = pygame.Rect(rect.right - t, rect.top, t, rect.height)
-                    pygame.draw.rect(surf, highlight, left_rect)
-                    pygame.draw.rect(surf, shadow, right_rect)
-                else:
-                    left_rect = pygame.Rect(rect.left, rect.top, t, rect.height)
-                    right_rect = pygame.Rect(rect.right - t, rect.top, t, rect.height)
-                    pygame.draw.rect(surf, shadow, left_rect)
-                    pygame.draw.rect(surf, highlight, right_rect)
-                if ly < 0:
-                    top_rect = pygame.Rect(rect.left, rect.top, rect.width, t)
-                    bottom_rect = pygame.Rect(rect.left, rect.bottom - t, rect.width, t)
-                    pygame.draw.rect(surf, highlight, top_rect)
-                    pygame.draw.rect(surf, shadow, bottom_rect)
-                else:
-                    top_rect = pygame.Rect(rect.left, rect.top, rect.width, t)
-                    bottom_rect = pygame.Rect(rect.left, rect.bottom - t, rect.width, t)
-                    pygame.draw.rect(surf, shadow, top_rect)
-                    pygame.draw.rect(surf, highlight, bottom_rect)
-                pygame.draw.rect(surf, (0,0,0), rect, 1)
-            else:
-                pygame.draw.rect(surf, base_color, rect)
-                pygame.draw.rect(surf, (0,0,0), rect, 1)
+        
+    def remove_block_at_world(self, wx, wy):
+        gx, gy = self.world_to_grid(wx, wy)
+        if (gx, gy) in self.blocks:
+            self.blocks.remove((gx, gy))
+            return True
+        return False
 
 class GraphicsEngine2D:
-    def __init__(self, win_size=(1280, 720)):
+    def __init__(self):
         pygame.init()
-        self.ar = AR()
-        self.win_size = win_size
-        self.screen = pygame.display.set_mode(win_size)
-        pygame.display.set_caption("AR Block Builder")
+        self.WIDTH, self.HEIGHT = 1280, 720
+        self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
+        pygame.display.set_caption("RoX 2D Mode")
         self.clock = pygame.time.Clock()
-        self.delta_time = 0.0
 
-        self.block_world = BlockWorld(grid_size=BLOCK_SIZE)
-        self.camera = Camera2D(pos=(0.0, 0.0), zoom=1.0, angle=0.0)
+        # AR & Input Setup
+        self.ar = AR()
+        self.input_handler = ARInputHandler(self) 
 
-        self.left_state = HandActionState()
-        self.right_state = HandActionState()
+        # Game World
+        self.camera = Camera2D(pos=(0, 0), zoom=1.0)
+        self.block_world = BlockWorld()
+        
+        # Interaction State
+        self.camera_target = [0, 0]
+        self.last_zoom_dist = None
+        self.last_pan_pos = None
+        self.debug_mode = True
 
-        self.both_pinched = False
-        self.both_initial = None
+    def handle_input(self):
+        # 1. Update AR Input Handler
+        self.input_handler.update(self.ar.ar_data)
+        
+        # 2. Get Data from Handler
+        l_state = self.input_handler.left_state
+        r_state = self.input_handler.right_state
+        l_pos = self.input_handler.left_finger_ema
+        r_pos = self.input_handler.right_finger_ema
+        
+        # ZOOM (Two Hands)
+        if l_state.active and r_state.active and l_pos and r_pos:
+            dx = l_pos[0] - r_pos[0]
+            dy = l_pos[1] - r_pos[1]
+            dist = math.hypot(dx, dy)
+            
+            if self.last_zoom_dist is not None:
+                delta = dist - self.last_zoom_dist
+                self.camera.zoom += delta * 0.01
+                self.camera.zoom = max(0.1, min(5.0, self.camera.zoom))
+            
+            self.last_zoom_dist = dist
+            self.last_pan_pos = None 
+            return 
+        else:
+            self.last_zoom_dist = None
 
-        self.left_last_place_time = 0.0
-        self.left_last_place_cell = None
-        self.left_last_place_px = None
+        # PAN CAMERA (Left Hand Pinch)
+        if l_state.active and l_pos:
+            if self.last_pan_pos is None:
+                self.last_pan_pos = l_pos
+            
+            dx = l_pos[0] - self.last_pan_pos[0]
+            dy = l_pos[1] - self.last_pan_pos[1]
+            
+            pan_speed = 2.0 / self.camera.zoom 
+            self.camera.pos[0] -= dx * pan_speed
+            self.camera.pos[1] -= dy * pan_speed
+            
+            self.last_pan_pos = l_pos
+        else:
+            self.last_pan_pos = None
 
-        self.left_finger_ema = None
-        self.right_finger_ema = None
+        # BUILD/DELETE (Right Hand)
+        gesture = self.ar.ar_data.get("GESTURES", {}).get("RIGHT", "NONE")
+        
+        if r_state.active and r_pos:
+            wx, wy = self.camera.screen_to_world(r_pos[0], r_pos[1], self.WIDTH, self.HEIGHT)
+            
+            if gesture == "OPEN_PALM":
+                 self.block_world.remove_block_at_world(wx, wy)
+            else:
+                 self.block_world.add_block_at_world(wx, wy)
 
-        self.camera_target = [self.camera.pos[0], self.camera.pos[1]]
+    def draw_grid(self):
+        cam_x, cam_y = self.camera.pos
+        zoom = self.camera.zoom
+        grid_sz = self.block_world.grid_size
+        
+        for gx, gy in self.block_world.blocks:
+            wx = gx * grid_sz
+            wy = gy * grid_sz
+            
+            sx, sy = self.camera.world_to_screen(wx, wy, self.WIDTH, self.HEIGHT)
+            size = grid_sz * zoom
+            
+            if -size < sx < self.WIDTH + size and -size < sy < self.HEIGHT + size:
+                # Draw Semi-Transparent Blocks so we can see AR feed behind?
+                # Pygame rects don't support alpha directly unless drawing to surface
+                # For performance, we stick to solid for now, or use a shape
+                
+                # Main Block
+                pygame.draw.rect(self.screen, (100, 200, 100), (sx - size/2, sy - size/2, size, size))
+                # Border
+                pygame.draw.rect(self.screen, (50, 100, 50), (sx - size/2, sy - size/2, size, size), 2)
 
-        self.debug = True
-        self.visual_scale = BLOCK_VISUAL_SCALE
-        self.brightside = BRIGHTSIDE_DEFAULT
-        self.light_dir = LIGHT_DIR
+    def render(self):
+        self.screen.fill((0, 0, 0, 0))
+        # 2. Draw blocks on top of camera feed
+        # CORE LOOP
+        # 1. Draw AR Feed FIRST (This acts as the background clear)
+        self.ar.render(self.screen) 
+        
+        # 2. Logic
+        self.handle_input()
+        self.draw_grid()
+        
+        # 3. Draw AR Cursors (Visual Feedback)
+        l_pos = self.input_handler.left_finger_ema
+        r_pos = self.input_handler.right_finger_ema
+        l_act = self.input_handler.left_state.active
+        r_act = self.input_handler.right_state.active
 
-    def euclid(self, a, b):
-        dx = b[0] - a[0]
-        dy = b[1] - a[1]
-        return math.hypot(dx, dy)
+        if l_pos:
+            col = (0, 255, 255) if l_act else (0, 100, 100)
+            pygame.draw.circle(self.screen, col, (int(l_pos[0]), int(l_pos[1])), 10)
+            if l_act: pygame.draw.circle(self.screen, (255, 255, 255), (int(l_pos[0]), int(l_pos[1])), 15, 2)
 
-    def _ema_update(self, prev, value, alpha=FINGER_EMA_ALPHA):
-        if prev is None:
-            return value
-        return (alpha * value[0] + (1 - alpha) * prev[0],
-                alpha * value[1] + (1 - alpha) * prev[1])
+        if r_pos:
+            gesture = self.ar.ar_data.get("GESTURES", {}).get("RIGHT", "NONE")
+            if gesture == "OPEN_PALM":
+                col = (255, 50, 50) # Red for delete
+            else:
+                col = (0, 255, 0) if r_act else (0, 100, 0) # Green for build
+            
+            pygame.draw.circle(self.screen, col, (int(r_pos[0]), int(r_pos[1])), 10)
+            if r_act: pygame.draw.circle(self.screen, (255, 255, 255), (int(r_pos[0]), int(r_pos[1])), 15, 2)
 
-    def _exp_alpha(self, dt, tau):
-        if tau <= 0 or dt <= 0:
-            return 1.0
-        return 1.0 - math.exp(-dt / tau)
+        # 4. UI / Debug
+        if self.debug_mode:
+            fps = int(self.clock.get_fps())
+            font = pygame.font.SysFont('Arial', 18)
+            info = [
+                f"FPS: {fps}",
+                f"Zoom: {self.camera.zoom:.2f}",
+                f"Blocks: {len(self.block_world.blocks)}",
+                f"Right Gesture: {self.ar.ar_data.get('GESTURES', {}).get('RIGHT', 'NONE')}"
+            ]
+            for i, text in enumerate(info):
+                surf = font.render(text, True, (255, 255, 0))
+                self.screen.blit(surf, (10, 10 + i * 20))
+
+        pygame.display.flip()
 
     def run(self):
         while True:
-            self.screen.fill((30, 30, 40))
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
+                    self.ar.stop()
                     pygame.quit()
                     sys.exit()
                 if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        self.ar.stop()
+                        pygame.quit()
+                        sys.exit()
                     if event.key == pygame.K_d:
-                        self.debug = not self.debug
-                    if event.key == pygame.K_b:
-                        self.brightside = not self.brightside
-                        get_logger_info('GAME', f'Brightside toggled: {self.brightside}', True)
-                    if event.key == pygame.K_v and BLOCK_VISUAL_SCALE_ALLOW_OVERLAP:
-                        self.visual_scale = 1.4 if self.visual_scale == 1.0 else 1.0
+                        self.debug_mode = not self.debug_mode
 
-            t_now = time.perf_counter()
-            data = self.ar.render(self.screen)
-
-            left_pts = data["POSITION_DATA"].get("LEFT", [])
-            right_pts = data["POSITION_DATA"].get("RIGHT", [])
-            left_pinched = data["CLICK_FLAG"].get("LEFT", False)
-            right_pinched = data["CLICK_FLAG"].get("RIGHT", False)
-
-            left_tip_px = None
-            right_tip_px = None
-            if left_pts and len(left_pts) > INDEX_TIP_IDX:
-                left_tip_px = left_pts[INDEX_TIP_IDX]
-            if right_pts and len(right_pts) > INDEX_TIP_IDX:
-                right_tip_px = right_pts[INDEX_TIP_IDX]
-
-            if left_tip_px:
-                self.left_finger_ema = self._ema_update(self.left_finger_ema, left_tip_px)
-                left_tip_px_smoothed = (int(round(self.left_finger_ema[0])), int(round(self.left_finger_ema[1])))
-            else:
-                left_tip_px_smoothed = None
-                self.left_finger_ema = None
-
-            if right_tip_px:
-                self.right_finger_ema = self._ema_update(self.right_finger_ema, right_tip_px)
-                right_tip_px_smoothed = (int(round(self.right_finger_ema[0])), int(round(self.right_finger_ema[1])))
-            else:
-                right_tip_px_smoothed = None
-                self.right_finger_ema = None
-
-            left_world = None
-            right_world = None
-            if left_tip_px_smoothed:
-                left_world = self.camera.screen_to_world(left_tip_px_smoothed[0], left_tip_px_smoothed[1], *self.win_size)
-            if right_tip_px_smoothed:
-                right_world = self.camera.screen_to_world(right_tip_px_smoothed[0], right_tip_px_smoothed[1], *self.win_size)
-
-            l_rising, l_falling, l_stable = self.left_state.update(left_pinched, left_world, left_tip_px_smoothed, self.camera.pos, self.camera.zoom, t_now)
-            r_rising, r_falling, r_stable = self.right_state.update(right_pinched, right_world, right_tip_px_smoothed, self.camera.pos, self.camera.zoom, t_now)
-
-            if l_stable and r_stable:
-                if not self.both_pinched:
-                    self.both_pinched = True
-                    if left_tip_px_smoothed and right_tip_px_smoothed:
-                        dist = self.euclid(left_tip_px_smoothed, right_tip_px_smoothed)
-                        self.both_initial = {
-                            "dist": dist,
-                            "zoom": self.camera.zoom,
-                            "angle": self.camera.angle,
-                            "left_px": left_tip_px_smoothed,
-                            "right_px": right_tip_px_smoothed
-                        }
-                else:
-                    if self.both_initial and left_tip_px_smoothed and right_tip_px_smoothed:
-                        cur_dist = self.euclid(left_tip_px_smoothed, right_tip_px_smoothed)
-                        if self.both_initial["dist"] > 1e-6:
-                            scale = cur_dist / self.both_initial["dist"]
-                            self.camera.zoom = self.both_initial["zoom"] * scale
-                            self.camera.clamp_zoom()
-                        lx, ly = left_tip_px_smoothed
-                        rx, ry = right_tip_px_smoothed
-                        cur_angle = math.atan2(ry - ly, rx - lx)
-                        init_lx, init_ly = self.both_initial["left_px"]
-                        init_rx, init_ry = self.both_initial["right_px"]
-                        init_angle = math.atan2(init_ry - init_ly, init_rx - init_lx)
-                        delta_angle = cur_angle - init_angle
-                        self.camera.angle = self.both_initial["angle"] + delta_angle
-            else:
-                if self.both_pinched:
-                    self.both_pinched = False
-                    self.both_initial = None
-
-            if l_stable and not (l_stable and r_stable):
-                if left_world:
-                    gx, gy = self.block_world.world_to_grid(left_world[0], left_world[1])
-                    current_cell = (gx, gy)
-                    place_allowed = False
-                    if (t_now - self.left_last_place_time) >= PLACEMENT_COOLDOWN:
-                        if self.left_last_place_cell != current_cell:
-                            place_allowed = True
-                        else:
-                            if self.left_last_place_px and left_tip_px_smoothed:
-                                move_px = self.euclid(self.left_last_place_px, left_tip_px_smoothed)
-                                if move_px >= PLACEMENT_MIN_MOVE:
-                                    place_allowed = True
-                    if place_allowed:
-                        added = self.block_world.add_block_at_world(left_world[0], left_world[1])
-                        if added:
-                            get_logger_info('GAME', f'Placed block at grid {current_cell} world {left_world}', True)
-                        else:
-                            get_logger_info('GAME', f'Block already present at grid {current_cell}', False)
-                        self.left_last_place_time = t_now
-                        self.left_last_place_cell = current_cell
-                        self.left_last_place_px = left_tip_px_smoothed
-            else:
-                self.left_last_place_px = None
-
-            if r_stable and not (l_stable and r_stable) and right_world and self.right_state.start_screen and self.right_state.start_cam is not None:
-                start_sx, start_sy = self.right_state.start_screen
-                cur_sx, cur_sy = right_tip_px_smoothed
-                dx_px = cur_sx - start_sx
-                dy_px = cur_sy - start_sy
-
-                dz = max(1.0, DEADZONE_PX * self.camera.zoom)
-                if abs(dx_px) < dz and abs(dy_px) < dz:
-                    dx_px = 0
-                    dy_px = 0
-
-                start_zoom = self.right_state.start_zoom if self.right_state.start_zoom else self.camera.zoom
-                dx_world = -dx_px / start_zoom
-                dy_world = -dy_px / start_zoom
-
-                start_cam_x, start_cam_y = self.right_state.start_cam
-                target_x = start_cam_x + dx_world
-                target_y = start_cam_y + dy_world
-
-                self.camera_target[0] = target_x
-                self.camera_target[1] = target_y
-
-                dt = self.delta_time or (1.0/60.0)
-                alpha = self._exp_alpha(dt, SMOOTH_TAU)
-                step_x = (self.camera_target[0] - self.camera.pos[0]) * alpha
-                step_y = (self.camera_target[1] - self.camera.pos[1]) * alpha
-                step_x = max(-MAX_STEP_WORLD, min(MAX_STEP_WORLD, step_x))
-                step_y = max(-MAX_STEP_WORLD, min(MAX_STEP_WORLD, step_y))
-                self.camera.pos[0] += step_x
-                self.camera.pos[1] += step_y
-            else:
-                dt = self.delta_time or (1.0/60.0)
-                if INSTANT_STOP:
-                    self.camera.pos[0] = self.camera_target[0]
-                    self.camera.pos[1] = self.camera_target[1]
-                else:
-                    alpha = self._exp_alpha(dt, SMOOTH_TAU)
-                    step_x = (self.camera_target[0] - self.camera.pos[0]) * alpha
-                    step_y = (self.camera_target[1] - self.camera.pos[1]) * alpha
-                    step_x = max(-MAX_STEP_WORLD, min(MAX_STEP_WORLD, step_x))
-                    step_y = max(-MAX_STEP_WORLD, min(MAX_STEP_WORLD, step_y))
-                    self.camera.pos[0] += step_x
-                    self.camera.pos[1] += step_y
-
-            if r_falling:
-                get_logger_info('GAME', f'Right pinch released; camera pos {self.camera.pos}', True)
-
-            visual_scale = self.visual_scale if BLOCK_VISUAL_SCALE_ALLOW_OVERLAP else 1.0
-            self.block_world.draw(self.screen, self.camera, self.win_size, visual_scale, brightside=self.brightside, light_dir=self.light_dir)
-
-            if self.debug:
-                if left_tip_px_smoothed:
-                    pygame.draw.circle(self.screen, (255, 100, 100), left_tip_px_smoothed, 8, 2)
-                    if left_pinched:
-                        pygame.draw.circle(self.screen, (255, 50, 50), left_tip_px_smoothed, 6)
-                if right_tip_px_smoothed:
-                    pygame.draw.circle(self.screen, (100, 100, 255), right_tip_px_smoothed, 8, 2)
-                    if right_pinched:
-                        pygame.draw.circle(self.screen, (50, 50, 255), right_tip_px_smoothed, 6)
-
-                font = pygame.font.SysFont("Arial", 16)
-                lines = [
-                    f"FPS: {int(self.clock.get_fps())}",
-                    f"Camera pos: ({self.camera.pos[0]:.1f}, {self.camera.pos[1]:.1f})",
-                    f"Target pos: ({self.camera_target[0]:.1f}, {self.camera_target[1]:.1f})",
-                    f"Zoom: {self.camera.zoom:.2f}",
-                    f"Left pinched: {l_stable} Right pinched: {r_stable}",
-                    f"Blocks: {len(self.block_world.blocks)}",
-                    f"Brightside: {self.brightside} (press B)",
-                    f"Light dir: ({self.light_dir[0]:.2f},{self.light_dir[1]:.2f})",
-                    f"Visual scale: {visual_scale}",
-                    f"Right start_screen: {self.right_state.start_screen}",
-                    f"Right start_cam: {self.right_state.start_cam}",
-                    "Press D to toggle debug"
-                ]
-                for i, line in enumerate(lines):
-                    surf_text = font.render(line, True, (220,220,220))
-                    self.screen.blit(surf_text, (10, 10 + i*18))
-
-            pygame.display.update()
-            self.delta_time = self.clock.tick(60) / 1000.0
-
-if __name__ == "__main__":
-    GraphicsEngine2D().run()
+            self.render()
+            
+            self.clock.tick(60)
