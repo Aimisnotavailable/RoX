@@ -119,6 +119,7 @@ class AR:
             "CLICK_FLAG":    {"LEFT": False,"RIGHT": False},
             "HAND_PRESENCE" : False
         }
+        self.image = None
 
     def _is_normalized(self, x, y):
         """Return True if coordinates look like normalized MediaPipe coords."""
@@ -361,7 +362,11 @@ class AR:
         pygame_surface = pygame.image.frombuffer(image.tobytes(), size, "RGB")
         return pygame_surface
 
-    def render(self, surf, render_camera_feed = True):
+    def render_camera_feed(self):
+        if not self.image == None:
+            surf.blit(pygame.transform.scale(self.image, surf.get_size()), (0, 0))
+
+    def render(self, surf):
         self.frame_count += 1
         ar_data = {
             "POSITION_DATA": {"LEFT": [], "RIGHT": []},
@@ -384,9 +389,7 @@ class AR:
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         res = self.hands.process(rgb)
         
-        if render_camera_feed:
-            image = self.cvimage_to_pygame(rgb)
-            surf.blit(pygame.transform.scale(image, surf.get_size()), (0, 0))
+        self.image = self.cvimage_to_pygame(rgb)
 
         # diagnostic prints
         get_logger_info('DEBUG', f"[AR] FRAME {self.frame_count} Mediapipe hands: {bool(res.multi_hand_landmarks)}")
