@@ -344,7 +344,7 @@ class GraphicsEngine3D:
     
     def render_feed_to_texture(self):
         if self.ar.image:
-            self.feed_surface.blit(self.ar.image, (0, 0))
+            self.feed_surface.blit(pygame.transform.scale(self.ar.image, self.WIN_SIZE), (0, 0))
             img_flipped = pygame.transform.flip(self.feed_surface, False, True)
             data = pygame.image.tostring(img_flipped, 'RGB')
             self.feed_texture.write(data)
