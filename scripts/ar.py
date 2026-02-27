@@ -112,6 +112,13 @@ class AR:
 
         # diagnostic counters
         self.frame_count = 0
+        self.ar_data = {
+            "POSITION_DATA": {"LEFT": [], "RIGHT": []},
+            "SCALE":         {"LEFT": 1,    "RIGHT": 1},
+            "CLICK_DIST":    {"LEFT": 0,    "RIGHT": 0},
+            "CLICK_FLAG":    {"LEFT": False,"RIGHT": False},
+            "HAND_PRESENCE" : False
+        }
 
     def _is_normalized(self, x, y):
         """Return True if coordinates look like normalized MediaPipe coords."""
@@ -354,7 +361,7 @@ class AR:
         pygame_surface = pygame.image.frombuffer(image.tobytes(), size, "RGB")
         return pygame_surface
 
-    def render(self, surf):
+    def render(self, surf, render_camera_feed = True):
         self.frame_count += 1
         ar_data = {
             "POSITION_DATA": {"LEFT": [], "RIGHT": []},
@@ -377,8 +384,9 @@ class AR:
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         res = self.hands.process(rgb)
         
-        # image = self.cvimage_to_pygame(rgb)
-        # surf.blit(image, (surf.get_width() - image.get_width(), 0))
+        if render_camera_feed:
+            image = self.cvimage_to_pygame(rgb)
+            surf.blit(pygame.transform.scale(image, surf.get_size()), (0, 0))
 
         # diagnostic prints
         get_logger_info('DEBUG', f"[AR] FRAME {self.frame_count} Mediapipe hands: {bool(res.multi_hand_landmarks)}")
@@ -541,5 +549,5 @@ class AR:
                         surf.blit(txt, (max(0, p[0]-20), max(0, p[1]-30)))
                     except Exception as e:
                         get_logger_info('CORE', f"[AR] fallback draw error {e}")
-
+        self.ar_data = ar_data
         return ar_data

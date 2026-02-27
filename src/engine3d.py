@@ -6,9 +6,9 @@ from PIL import Image
 from src.camera import FPSCamera, RTSCamera
 from src.mesh import CubeMesh
 from src.builder import VoxelBuilder
-from src.quad import ScreenQuad  # <--- NEW
+from src.quad import ScreenQuad
 from src.builder import BLOCK_TYPES
-from src.handstateaction import HandActionState
+from src.arinput import ARInputHandler
 from scripts.ar import AR
 
 class GraphicsEngine3D:
@@ -31,7 +31,6 @@ class GraphicsEngine3D:
         self.delta_time = 0
         
         # MODE SWITCHING
-        # --- SINGLE BUILDER, TWO CAMERAS ---
         self.builder = VoxelBuilder(self)
         self.cam_fps = FPSCamera(self)
         self.cam_rts = RTSCamera(self)
@@ -39,14 +38,12 @@ class GraphicsEngine3D:
         # Assets
         self.prog = self.create_shader_program('shaders/default')
         self.mesh = CubeMesh(self)
-
-        # Load the new array instead of the old test.png
         self.texture_array = self.load_texture_array('assets/textures/tex_array_1.png')
         
         # Background
         self.quad = ScreenQuad(self)
         self.bg_texture = self.load_texture('assets/textures/sky.png') 
-        self.use_aspect_ratio = True  # <--- NEW TOGGLE STATE
+        self.use_aspect_ratio = True
         
         # UI
         self.font = pygame.font.SysFont('arial', 30, bold=True)
@@ -59,37 +56,31 @@ class GraphicsEngine3D:
         pygame.event.set_grab(True)
         pygame.mouse.set_visible(False)
 
-
         # Controls
         self.clicking = False
         self.delay = 0
         
         # AR
         self.ar = AR()
-        self.ar_surf = pygame.Surface(self.WIN_SIZE, pygame.SRCALPHA)
-        self.right_state = HandActionState()
-        self.left_state = HandActionState()
+        self.input_handler = ARInputHandler(self)
+        
+        # AR Interaction State
+        self.last_pinch_dist = None
+        self.ar_cursor_pos = None 
+        self.last_rotate_pos = None
+        self.last_build_hand_pos = None  # <--- NEW: For tracking drag velocity
 
     def switch_camera_mode(self):
-        """
-        Toggle between RTS and FPS modes while preserving the player's FPS position.
-        - When switching to RTS: save FPS state and base RTS camera on FPS position.
-        - When switching back to FPS: restore the saved FPS state.
-        """
         self.is_rts_mode = not self.is_rts_mode
 
         if self.is_rts_mode:
-            # Going into RTS: save FPS state and position RTS above the FPS player
             print("Mode: RTS")
-            # Save FPS so we can restore later
             self.cam_fps.save_state()
-            # Base RTS camera on the FPS camera so the user doesn't get lost
             self.cam_rts.from_fps(self.cam_fps)
             self.camera = self.cam_rts
             pygame.event.set_grab(False)
             pygame.mouse.set_visible(True)
         else:
-            # Going back to FPS: restore the saved FPS state
             print("Mode: FPS")
             self.cam_fps.restore_state()
             self.camera = self.cam_fps
@@ -97,20 +88,94 @@ class GraphicsEngine3D:
             pygame.mouse.set_visible(False)
 
     def convert_hand_inputs_to_world_inputs(self):
-        pass
+        """
+        Interprets ARInputHandler states into 3D camera/builder actions.
+        """
+        l_state = self.input_handler.left_state
+        r_state = self.input_handler.right_state
+        l_pos = self.input_handler.left_finger_ema
+        r_pos = self.input_handler.right_finger_ema
+        
+        # Always update cursor if Right Hand is visible
+        if r_pos:
+            self.ar_cursor_pos = r_pos
+        else:
+            self.ar_cursor_pos = None
 
-    def handle_actions(self):
-        pass
-    
+        # -------------------------
+        # CASE 1: ZOOM (Both Hands Pinched)
+        # -------------------------
+        if l_state.active and r_state.active and l_pos and r_pos:
+            dx = l_pos[0] - r_pos[0]
+            dy = l_pos[1] - r_pos[1]
+            current_dist = (dx**2 + dy**2)**0.5
+            
+            if self.last_pinch_dist is not None:
+                delta = current_dist - self.last_pinch_dist
+                self.camera.position += self.camera.forward * (delta * 0.05)
+                
+            self.last_pinch_dist = current_dist
+            self.last_rotate_pos = None
+            self.clicking = False
+            self.builder.stop_raycast = False
+            return
+        else:
+            self.last_pinch_dist = None
+
+        # -------------------------
+        # CASE 2: ROTATE WORLD (Left Hand Pinched)
+        # -------------------------
+        if l_state.active and l_pos:
+            if self.last_rotate_pos is None:
+                self.last_rotate_pos = l_pos
+            
+            dx = l_pos[0] - self.last_rotate_pos[0]
+            dy = l_pos[1] - self.last_rotate_pos[1]
+            
+            rot_speed = 0.005
+            self.builder.rotation.y += dx * rot_speed
+            self.builder.rotation.x += dy * rot_speed
+            
+            self.last_rotate_pos = l_pos
+        else:
+            self.last_rotate_pos = None
+
+        # -------------------------
+        # CASE 3: BUILD/SNAP (Right Hand Pinched)
+        # -------------------------
+        if r_state.active and r_pos:
+            self.clicking = True
+            self.builder.stop_raycast = True 
+            
+            # --- FIX: Calculate Hand Velocity (Delta) for Snapping ---
+            if self.last_build_hand_pos is None:
+                # First frame of pinch, no movement yet
+                self.last_build_hand_pos = r_pos
+                rel_x, rel_y = 0, 0
+            else:
+                # Calculate movement since last frame
+                rel_x = r_pos[0] - self.last_build_hand_pos[0]
+                rel_y = r_pos[1] - self.last_build_hand_pos[1]
+            
+            # Inject this into Camera so Builder can see "Mouse Movement"
+            self.camera.movement_rel = (rel_x, rel_y)
+            
+            # Store current pos for next frame
+            self.last_build_hand_pos = r_pos
+            
+        else:
+            self.clicking = False
+            self.builder.stop_raycast = False
+            self.last_build_hand_pos = None # Reset history
+
     def load_program(self, path):
-        # Helper to load shaders easily
         with open(f'{path}.vert') as f: vertex_src = f.read()
         with open(f'{path}.frag') as f: fragment_src = f.read()
         return self.ctx.program(vertex_shader=vertex_src, fragment_shader=fragment_src)
 
     def load_texture(self, path):
         try:
-            img = Image.open(path).convert('RGBA') # Force RGBA
+            img = Image.open(path).convert('RGBA')
             img = img.transpose(Image.FLIP_TOP_BOTTOM)
             texture = self.ctx.texture(img.size, 4, img.tobytes())
             texture.build_mipmaps()
@@ -122,53 +187,24 @@ class GraphicsEngine3D:
     def load_texture_array(self, path):
         try:
             img = Image.open(path).convert('RGBA')
-            # remove the flip for now to keep logic simple - we can flip in shader or individual tiles
-            # img = img.transpose(Image.FLIP_TOP_BOTTOM) 
-            
-            # 1. Define Tile Size MANUALLY
-            # Since your image is a grid, we can't guess the size from the width.
             tile_size = 512 
-            
             cols = img.width // tile_size
             rows = img.height // tile_size
-            
-            print(f"Loading Grid: {path}")
-            print(f"  - Grid: {cols} cols x {rows} rows")
-            
-            # 2. Slice the Grid into separate tiles
-            # OpenGL Array expects: [Tile 0 Bytes] + [Tile 1 Bytes] + ...
             tile_data = bytearray()
-            
             for y in range(rows):
                 for x in range(cols):
-                    # Calculate coordinates
                     left = x * tile_size
                     upper = y * tile_size
                     right = left + tile_size
                     lower = upper + tile_size
-                    
-                    # Crop the tile
                     tile = img.crop((left, upper, right, lower))
-                    
-                    # Optional: Flip tile for OpenGL (Bottom-Left origin)
                     tile = tile.transpose(Image.FLIP_TOP_BOTTOM)
-                    
                     tile_data.extend(tile.tobytes())
-            
-            # 3. Create the Array
-            # Total layers = rows * cols (e.g., 8 * 3 = 24 layers)
             num_layers = rows * cols
-            
-            texture_array = self.ctx.texture_array(
-                (tile_size, tile_size, num_layers), 
-                4, 
-                tile_data
-            )
-            
+            texture_array = self.ctx.texture_array((tile_size, tile_size, num_layers), 4, tile_data)
             texture_array.build_mipmaps()
             texture_array.filter = (moderngl.NEAREST_MIPMAP_LINEAR, moderngl.NEAREST)
             return texture_array
-            
         except Exception as e:
             print(f"Error: {e}")
             return None
@@ -176,79 +212,70 @@ class GraphicsEngine3D:
     def create_shader_program(self, path):
         return self.load_program(path)
 
-    def update_ui(self):
-        """Draws Pygame text onto a Surface, then converts it to a GL Texture"""
-        # 1. Clear the surface with transparent color (0,0,0,0)
-        self.ui_surface.fill((0, 0, 0, 0))
-        
-        # 2. Draw Text (Standard Pygame)
+    def draw_ui_text(self):
         text = f"FPS: {int(self.clock.get_fps())} | Camera : {'RTS' if self.is_rts_mode else 'FPS'}"
-        text_surf = self.font.render(text, True, (255, 255, 0)) # Yellow Text
+        text_surf = self.font.render(text, True, (255, 255, 0))
         self.ui_surface.blit(text_surf, (20, 20))
         
-        # 3. Draw Instructions
         current_data = BLOCK_TYPES[self.builder.current_block_index]
         block_name = current_data['name']
         text_surf = self.font.render(f"Selected: {block_name}", True, (255, 255, 255))
         self.ui_surface.blit(text_surf, (20, 100))
 
-        # self.ar_surf.fill((0, 0, 0, 0))
-        # self.ar.render(self.ar_surf)
-
-        # flipped_data = pygame.image.tostring(pygame.transform.flip(self.ar_surf, False, True), 'RGBA')
-        # self.ui_texture.write(flipped_data)
-
-        # 4. Upload this surface data to the GPU Texture
-        # We must flip it because OpenGL expects bottom-left origin
-        flipped_data = pygame.image.tostring(pygame.transform.flip(self.ui_surface, False, True), 'RGBA')
-        self.ui_texture.write(flipped_data)
-
-
-
     def update(self):
+        # 1. Update AR State
+        self.input_handler.update(self.ar.ar_data)
+        
+        # 2. Update Camera (Calculate Matrices & Mouse Input)
         self.camera.update()
         self.camera.move()
-        self.builder.update()
+
+        # 3. OVERRIDE Inputs with AR (Must happen AFTER camera.update)
+        #    This ensures our hand calculated 'movement_rel' overwrites the stationary mouse.
+        if self.is_rts_mode and self.ar.ar_data.get("HAND_PRESENCE", False):
+            self.convert_hand_inputs_to_world_inputs()
+        
+        # 4. Update Builder
+        self.builder.update(screen_pos=self.ar_cursor_pos)
+        
+        # 5. Handle Clicking / Snapping
+        if self.clicking:
+            if not self.delay:
+                self.builder.handle_click()
+                self.delay = 5  # Speed of placing blocks (lower = faster)
+        self.delay = max(0, self.delay - 0.06 * self.delta_time)
+        
         self.time = pygame.time.get_ticks() * 0.001
         
-        # Update 3D Uniforms
         self.prog['m_proj'].write(self.camera.m_proj)
         self.prog['m_view'].write(self.camera.m_view)
         self.prog['light_pos'].write(glm.vec3(0, 5, 5))
-        # self.prog['cam_pos'].write(self.camera.position)
+    
+    def render_2d(self):        
+        flipped_data = pygame.image.tostring(pygame.transform.flip(self.ui_surface, False, True), 'RGBA')
+        self.ui_texture.write(flipped_data)
 
     def render(self):
         self.ctx.clear(0.0, 0.0, 0.0)
         
-
-        # Background
         self.ctx.disable(moderngl.DEPTH_TEST)
-        
-        # Pass the toggle state here!
-        self.quad.render(self.bg_texture, 
-                         image_size=self.bg_texture.size, 
-                         keep_aspect=self.use_aspect_ratio)
-                         
-        # 3. Render 3D Scene (Depth Test ON)
+        self.ui_surface.fill((0, 0, 0, 0))
+        self.ar.render(self.ui_surface)
+        self.draw_ui_text()
+        self.render_2d()
+        self.ctx.disable(moderngl.DEPTH_TEST)
+
+        self.quad.render(self.ui_texture)
+
         self.ctx.enable(moderngl.DEPTH_TEST)
         self.texture_array.use(location=0)
         self.builder.render()
-        
-        # 4. Render UI Overlay (Depth Test OFF, Blending ON)
-        self.update_ui() 
-        self.ctx.disable(moderngl.DEPTH_TEST)
-        
-        # The UI texture is the same size as the screen, so we don't need to pass a size
-        # (It will default to screen size in the quad class)
-        self.quad.render(self.ui_texture)
-        
+                
         pygame.display.flip()
 
     def handle_events(self):
-        # ... (Keep existing code) ...
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
-                # Clean up resources
                 self.mesh.vbo.release()
                 self.prog.release()
                 pygame.quit()
@@ -257,7 +284,6 @@ class GraphicsEngine3D:
             if event.type == pygame.KEYDOWN and event.key == pygame.K_TAB:
                 self.builder.toggle_mode()
                 
-            # Mode Switch
             if event.type == pygame.KEYDOWN and event.key == pygame.K_m:
                 self.switch_camera_mode()
 
@@ -279,14 +305,6 @@ class GraphicsEngine3D:
 
             if event.type == pygame.KEYDOWN and event.key == pygame.K_F1:
                 self.use_aspect_ratio = not self.use_aspect_ratio
-        
-        if self.clicking:
-            if not self.delay:
-                self.builder.handle_click()
-                self.delay = 5            
-        self.delay = max(0, self.delay - 0.06 * self.delta_time)
-        
-        
         
     def run(self):
         while True:

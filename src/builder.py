@@ -43,15 +43,13 @@ class VoxelBuilder:
         self.atlas_rows = 2
         self.atlas_cols = 2
 
-        # If your cube mesh is centered at (0.5,0.5,0.5) vs at (0,0,0) corner,
-        # set this to glm.vec3(0.5) to align ghost/wireframe with rendered cubes.
-        # If your mesh is built from (0..1) with origin at corner, keep glm.vec3(0.0).
+        # Voxel center offset for alignment
         self.voxel_center_offset = glm.vec3(0.0, 0.0, 0.0)
 
-        # Debug flag: set True to render visited voxels or ray (requires extra debug draw code)
+        # Debug flags
         self.debug_draw = False
         self.snap_axis = (0, 0)
-        self._snapped_place_pos = (0, 0)
+        self._snapped_place_pos = (0, 0, 0)
         self.stop_raycast = False
         self.sensitivity = 0.2
 
@@ -71,9 +69,6 @@ class VoxelBuilder:
     def world_to_model_ray(self, origin, direction):
         """
         Transform a world-space ray into model/local space using the inverse model matrix.
-        origin: glm.vec3 (world)
-        direction: glm.vec3 (world)
-        returns: (local_origin: glm.vec3, local_direction: glm.vec3)
         """
         model = self.get_model_matrix()
         inv_model = glm.inverse(model)
@@ -92,8 +87,7 @@ class VoxelBuilder:
 
     def model_to_world_pos(self, local_pos):
         """
-        Convert a local voxel coordinate (tuple or glm.vec3) to world-space position
-        using the model matrix. Returns glm.vec3.
+        Convert a local voxel coordinate to world-space position.
         """
         model = self.get_model_matrix()
         p4 = glm.vec4(local_pos[0], local_pos[1], local_pos[2], 1.0)
@@ -101,18 +95,23 @@ class VoxelBuilder:
         return glm.vec3(w4.x, w4.y, w4.z)
 
     # -------------------------
-    # Mouse -> world ray
+    # 2D Screen -> RTS RAY
     # -------------------------
-    def get_mouse_ray(self):
+    def get_rts_ray(self, screen_pos=None):
         """
-        Returns (origin, direction) in world space for the current mouse position.
+        Returns (origin, direction) in world space for the current mouse OR hand position.
+        Accepts optional screen_pos (x, y) for AR hand integration.
         """
-        mouse_x, mouse_y = pygame.mouse.get_pos()
+        if screen_pos is None:
+            _x, _y = pygame.mouse.get_pos()
+        else:
+            _x, _y = screen_pos  # Use the AR hand coordinates
+
         width, height = self.app.WIN_SIZE
 
         # Normalized Device Coordinates
-        x = (2.0 * mouse_x) / width - 1.0
-        y = 1.0 - (2.0 * mouse_y) / height
+        x = (2.0 * _x) / width - 1.0
+        y = 1.0 - (2.0 * _y) / height
 
         clip_coords = glm.vec4(x, y, -1.0, 1.0)
         eye_coords = glm.inverse(self.app.camera.m_proj) * clip_coords
@@ -120,42 +119,33 @@ class VoxelBuilder:
 
         world_ray = glm.inverse(self.app.camera.m_view) * eye_coords
         ray_direction = glm.normalize(glm.vec3(world_ray))
+        
         return self.app.camera.position, ray_direction
 
     # -------------------------
     # Raycast entry points
     # -------------------------
     def raycast_fps(self, origin, direction):
-        # FPS uses camera forward ray (already transformed to model space by caller)
         self.raycast_generic(origin, direction, is_rts=False)
 
     def raycast_rts(self, origin, direction):
-        # RTS uses mouse ray (already transformed to model space by caller)
         self.raycast_generic(origin, direction, is_rts=True)
 
     # -------------------------
     # Voxel traversal (Amanatides-Woo DDA)
-    # Works in local/model space voxel coordinates
     # -------------------------
     def raycast_generic(self, origin, direction, is_rts=False):
         """
-        origin, direction are in model/local space.
         Sets self.delete_pos and self.place_pos (both in local voxel coords) or None.
-        place_pos will only be set when a valid placement is allowed:
-          - adjacent to a hit block (delete_pos != None), or
-          - a valid ground-plane hit (RTS mode).
         """
-
-        # Normalize direction so t is in model units
         direction = glm.normalize(direction)
 
-        # Small epsilon to avoid self-intersection when origin is exactly on a boundary
+        # Small epsilon to avoid self-intersection
         eps = 1e-6
         origin = glm.vec3(origin.x + direction.x * eps,
                           origin.y + direction.y * eps,
                           origin.z + direction.z * eps)
 
-        # Current voxel coordinates (local/model space)
         x = math.floor(origin.x)
         y = math.floor(origin.y)
         z = math.floor(origin.z)
@@ -164,12 +154,10 @@ class VoxelBuilder:
         step_y = 1 if direction.y >= 0 else -1
         step_z = 1 if direction.z >= 0 else -1
 
-        # tDelta: how far along the ray we must move for the ray to cross one voxel in that axis
         t_delta_x = abs(1.0 / direction.x) if abs(direction.x) > 1e-12 else 1e30
         t_delta_y = abs(1.0 / direction.y) if abs(direction.y) > 1e-12 else 1e30
         t_delta_z = abs(1.0 / direction.z) if abs(direction.z) > 1e-12 else 1e30
 
-        # tMax: distance along ray to the first voxel boundary on each axis
         if step_x > 0:
             t_max_x = (x + 1.0 - origin.x) * t_delta_x
         else:
@@ -188,56 +176,30 @@ class VoxelBuilder:
         max_dist = 60.0 if is_rts else 8.0
         last_pos = None
 
-        # If origin starts inside a block, treat as immediate hit (common FPS behavior)
         if (x, y, z) in self.cubes:
             self.delete_pos = (x, y, z)
             self.place_pos = None
             return
 
-        # Main traversal loop
         while True:
-            # # RTS ground plane check: compute t where ray crosses y = 0 (model-space ground)
-            # if is_rts and direction.y < 0:
-            #     t_ground = (0.0 - origin.y) / direction.y
-            #     nearest_boundary_t = min(t_max_x, t_max_y, t_max_z)
-            #     if 0.0 <= t_ground <= nearest_boundary_t and t_ground <= max_dist:
-            #         # Ground intersection occurs before any voxel boundary and within range
-            #         gx = x
-            #         gz = z
-            #         # If there's a block exactly at ground voxel, prefer that block
-            #         if (gx, 0, gz) in self.cubes:
-            #             self.delete_pos = (gx, 0, gz)
-            #             self.place_pos = last_pos
-            #             return
-            #         # Otherwise place on top of ground (y = 1)
-            #         self.delete_pos = None
-            #         self.place_pos = (gx, 0, gz)
-            #         return
-
-            # If current voxel contains a block, we hit it
             if (x, y, z) in self.cubes:
                 self.delete_pos = (x, y, z)
                 self.place_pos = last_pos
                 if last_pos is None:
-                    # fallback: no last empty voxel recorded
                     self.snap_axis = None
                 else:
                     delta = (last_pos[0] - x, last_pos[1] - y, last_pos[2] - z)
-                    # choose axis with largest absolute delta (should be ±1)
                     axis = max(range(3), key=lambda i: abs(delta[i]))
                     sign = 1 if delta[axis] > 0 else -1 if delta[axis] < 0 else 0
                     self.snap_axis = (axis, sign)
                 return
 
-            # Stop if nearest boundary is beyond max distance
             nearest_t = min(t_max_x, t_max_y, t_max_z)
             if nearest_t > max_dist:
                 break
 
-            # Save current voxel as last empty before stepping
             last_pos = (x, y, z)
 
-            # Step along the smallest t_max
             if t_max_x <= t_max_y and t_max_x <= t_max_z:
                 x += step_x
                 t_max_x += t_delta_x
@@ -248,7 +210,6 @@ class VoxelBuilder:
                 z += step_z
                 t_max_z += t_delta_z
 
-        # No hit found within range
         self.place_pos = None
         self.delete_pos = None
 
@@ -257,43 +218,37 @@ class VoxelBuilder:
     # -------------------------
     def handle_click(self):
         """
-        Place or delete blocks depending on mode.
-        BUILD: only place if place_pos is valid and either adjacent to a block (delete_pos exists)
-               or was set by a valid ground hit (delete_pos is None but place_pos.y == 1).
-        DELETE: delete hovered_block if present.
+        Place or delete blocks.
         """
-        # read mouse movement and clamp it to avoid huge jumps
-
+        # --- Mouse/Raycast Snapping Logic ---
+        # Only applies if we are 'holding' the click in RTS mode
         if self.app.is_rts_mode and self.stop_raycast and self.place_pos is not None:
-            # ensure pos is a list of floats
             pos = [float(self.place_pos[0]), float(self.place_pos[1]), float(self.place_pos[2])]
-            rel_x, rel_y = self.app.camera.mouse_rel
+            
+            # Note: For AR, movement_rel might be 0, so this fine-tune snapping
+            # might not work perfectly without AR delta injection, but basic placement works.
+            rel_x, rel_y = self.app.camera.movement_rel
 
             if getattr(self, 'snap_axis', None) is not None:
                 axis, sign = self.snap_axis
-
-                # choose which mouse axis to use for each snap axis
-                if axis == 0:   # x axis -> use horizontal mouse movement
+                if axis == 0:
                     delta = -rel_x * self.sensitivity
-                elif axis == 1: # y axis -> use vertical mouse movement
+                elif axis == 1:
                     delta = rel_y * self.sensitivity
-                else:           # z axis -> use vertical mouse movement
+                else:
                     delta = -rel_y * self.sensitivity
-
-                # apply delta in the correct direction
                 pos[axis] -= delta * sign
 
-            # snap to nearest voxel (use round, not int)
             snapped = [round(p) for p in pos]
-            self.place_pos = glm.vec3(pos[0], pos[1], pos[2])  # keep float for ghost movement
-            self._snapped_place_pos = tuple(int(v) for v in snapped)  # store integer candidate
+            self.place_pos = glm.vec3(pos[0], pos[1], pos[2])
+            self._snapped_place_pos = tuple(int(v) for v in snapped)
 
+        # --- Actual Block Placement ---
         if self.mode == 'BUILD' and self.place_pos:
-            # Allow placement only if adjacent to an existing block (delete_pos != None)
-            # or if it was a valid ground placement (delete_pos is None and place_pos[1] == 1)
             if self.delete_pos is not None or (self.delete_pos is None and self.place_pos[1] == 1):
                 block_data = BLOCK_TYPES[self.current_block_index]
-                if hasattr(self, '_snapped_place_pos'):
+                
+                if hasattr(self, '_snapped_place_pos') and self.app.is_rts_mode:
                     place_pos_int = self._snapped_place_pos
                 else:
                     place_pos_int = tuple(int(round(p)) for p in self.place_pos)
@@ -309,9 +264,12 @@ class VoxelBuilder:
         self.mode = 'DELETE' if self.mode == 'BUILD' else 'BUILD'
 
     # -------------------------
-    # Update loop: choose ray strategy and update UI state
+    # Update loop
     # -------------------------
-    def update(self):
+    def update(self, screen_pos=None):
+        """
+        Accepts optional screen_pos (x,y) to drive the RTS ray from AR hands.
+        """
         keys = pygame.key.get_pressed()
 
         # Rotation and scale controls
@@ -329,42 +287,35 @@ class VoxelBuilder:
         if keys[pygame.K_x]:
             self.scale = max(0.1, self.scale - speed * 0.5)
 
-        # UI Update for Window Title
         title = f"RoX | Mode: {self.mode} | Block ID: {self.current_block_index} | FPS: {int(self.app.clock.get_fps())}"
         pygame.display.set_caption(title)
 
         # Choose Raycast Strategy based on Engine Mode
         if self.app.is_rts_mode:
-            # Mouse ray in world space -> transform to model/local space
-            ray_origin_world, ray_direction_world = self.get_mouse_ray()
+            # Pass screen_pos (Hand) or None (Mouse) to the ray calculator
+            ray_origin_world, ray_direction_world = self.get_rts_ray(screen_pos)
+            
             local_origin, local_direction = self.world_to_model_ray(ray_origin_world, ray_direction_world)
             if not self.stop_raycast:
                 self.raycast_rts(local_origin, local_direction)
         else:
-            # FPS uses camera forward (world) -> transform to model/local space
+            # FPS uses camera forward
             ray_origin_world = self.app.camera.position
             ray_direction_world = self.app.camera.forward
             local_origin, local_direction = self.world_to_model_ray(ray_origin_world, ray_direction_world)
             self.raycast_fps(local_origin, local_direction)
 
-        # Update hovered_block for delete mode (convert delete_pos to hovered)
         if self.mode == 'DELETE':
             self.hovered_block = self.delete_pos
         else:
             self.hovered_block = None
 
-    # -------------------------
-    # Texture atlas helper
-    # -------------------------
     def get_uv_offset(self, block_id):
         col = block_id % self.atlas_cols
         row = block_id // self.atlas_cols
         step = 1.0 / self.atlas_cols
         return glm.vec2(col * step, row * step)
 
-    # -------------------------
-    # Rendering
-    # -------------------------
     def render(self):
         base_model = self.get_model_matrix()
 
@@ -392,7 +343,6 @@ class VoxelBuilder:
             self.app.prog['is_ghost'].value = 1
             self.app.prog['objectColor'].write(glm.vec3(1.0, 1.0, 1.0))
 
-            # Render ghost at place_pos; apply voxel_center_offset so it aligns with mesh origin convention
             ghost_pos = (self.place_pos[0] + self.voxel_center_offset.x,
                          self.place_pos[1] + self.voxel_center_offset.y,
                          self.place_pos[2] + self.voxel_center_offset.z)
@@ -400,11 +350,10 @@ class VoxelBuilder:
 
             self.app.prog['is_ghost'].value = 0
 
-        # 3. BUILD CURSOR (Optional Wireframe)
+        # 3. BUILD CURSOR
         if self.mode == 'BUILD' and self.place_pos:
             self.app.prog['is_wireframe'].value = 1
 
-            # Build a model for the wireframe that matches how we rendered the ghost
             wire_pos = glm.vec3(self.place_pos[0] + self.voxel_center_offset.x,
                                 self.place_pos[1] + self.voxel_center_offset.y,
                                 self.place_pos[2] + self.voxel_center_offset.z)
@@ -418,12 +367,6 @@ class VoxelBuilder:
             self.app.prog['is_wireframe'].value = 0
 
     def render_block(self, pos, base_model, layers):
-        """
-        pos: either integer voxel tuple (x,y,z) or a glm.vec3 for ghost/wireframe.
-        base_model: model matrix for the whole builder.
-        layers: tuple of (bottom, side, top) layer indices.
-        """
-        # If pos is a tuple of ints, convert to glm.vec3
         if not isinstance(pos, glm.vec3):
             model_pos = glm.vec3(pos[0], pos[1], pos[2])
         else:
@@ -432,7 +375,6 @@ class VoxelBuilder:
         model = glm.translate(base_model, model_pos)
         self.app.prog['m_model'].write(model)
 
-        # layers ordering: bottom, side, top
         self.app.prog['u_layer_bottom'].value = layers[0]
         self.app.prog['u_layer_side'].value = layers[1]
         self.app.prog['u_layer_top'].value = layers[2]

@@ -1,50 +1,56 @@
-# Helper classes
-from scripts.config import *
+# src/handstateaction.py
+from scripts.config import PINCH_STABLE_TIME
 
 class HandActionState:
+    """
+    Tracks the state of a single hand (Left or Right).
+    Handles debouncing (stability checks) and movement deltas.
+    """
     def __init__(self):
-        self.prev_pinched = False
-        self.pinched_since = None
+        # Is the pinch currently active and stable?
+        self.active = False
+        
+        # Screen coordinates where the current stable pinch started
         self.start_pos = None
-        self.start_screen = None
-        self.start_cam = None
-        self.start_zoom = None
-        self.stable = False
-        self._tentative_start = None
+        
+        # Current screen coordinates (smoothed)
+        self.current_pos = None
 
-    def update(self, is_pinched, pos_world, screen_px, cam_pos, cam_zoom, t_now):
-        rising = False
-        falling = False
+        # Internal state for debouncing
+        self._raw_pinch_start_time = None
+        self._is_raw_pinched = False
+
+    def update(self, is_pinched, current_pos, current_time):
+        """
+        Updates the state based on raw pinch data and smoothed position.
+        """
+        self.current_pos = current_pos
 
         if is_pinched:
-            if not self.prev_pinched:
-                self.pinched_since = t_now
-                self.prev_pinched = True
-                self.stable = False
-                self._tentative_start = (pos_world, screen_px, (cam_pos[0], cam_pos[1]), cam_zoom)
-            else:
-                if not self.stable and self.pinched_since is not None and (t_now - self.pinched_since) >= PINCH_STABLE_TIME:
-                    rising = True
-                    self.stable = True
-                    if self._tentative_start is not None:
-                        self.start_pos, self.start_screen, self.start_cam, self.start_zoom = self._tentative_start
-                        self._tentative_start = None
-                    else:
-                        self.start_pos = pos_world
-                        self.start_screen = screen_px
-                        self.start_cam = (cam_pos[0], cam_pos[1])
-                        self.start_zoom = cam_zoom
-        else:
-            if self.prev_pinched:
-                if self.stable:
-                    falling = True
-                self.prev_pinched = False
-                self.pinched_since = None
-                self.start_pos = None
-                self.start_screen = None
-                self.start_cam = None
-                self.start_zoom = None
-                self.stable = False
-                self._tentative_start = None
+            # If this is a new pinch, mark the start time
+            if not self._is_raw_pinched:
+                self._is_raw_pinched = True
+                self._raw_pinch_start_time = current_time
 
-        return rising, falling, self.stable
+            # If we are not yet 'active', check if we have held it long enough
+            if not self.active:
+                if (current_time - self._raw_pinch_start_time) >= PINCH_STABLE_TIME:
+                    self.active = True
+                    self.start_pos = current_pos
+        else:
+            # Pinch released
+            self._is_raw_pinched = False
+            self._raw_pinch_start_time = None
+            self.active = False
+            self.start_pos = None
+
+    @property
+    def drag_delta(self):
+        """
+        Returns (dx, dy) tuple of movement since the pinch started.
+        Returns (0, 0) if not active.
+        """
+        if self.active and self.current_pos and self.start_pos:
+            return (self.current_pos[0] - self.start_pos[0], 
+                    self.current_pos[1] - self.start_pos[1])
+        return (0, 0)
