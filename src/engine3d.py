@@ -192,11 +192,11 @@ class GraphicsEngine3D:
         text_surf = self.font.render(f"Selected: {block_name}", True, (255, 255, 255))
         self.ui_surface.blit(text_surf, (20, 100))
 
-        self.ar_surf.fill((0, 0, 0, 0))
-        self.ar.render(self.ar_surf)
+        # self.ar_surf.fill((0, 0, 0, 0))
+        # self.ar.render(self.ar_surf)
 
-        flipped_data = pygame.image.tostring(pygame.transform.flip(self.ar_surf, False, True), 'RGBA')
-        self.ui_texture.write(flipped_data)
+        # flipped_data = pygame.image.tostring(pygame.transform.flip(self.ar_surf, False, True), 'RGBA')
+        # self.ui_texture.write(flipped_data)
 
         # 4. Upload this surface data to the GPU Texture
         # We must flip it because OpenGL expects bottom-left origin
@@ -263,7 +263,9 @@ class GraphicsEngine3D:
 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:
-                    self.clicking = True    
+                    self.clicking = True
+                    if self.is_rts_mode:
+                        self.builder.stop_raycast = True    
 
                 if event.button == 4:
                     self.builder.current_block_index = (self.builder.current_block_index + 1) % len(BLOCK_TYPES)
@@ -273,6 +275,7 @@ class GraphicsEngine3D:
             if event.type == pygame.MOUSEBUTTONUP:
                 if event.button == 1:
                     self.clicking = False
+                    self.builder.stop_raycast = False
 
             if event.type == pygame.KEYDOWN and event.key == pygame.K_F1:
                 self.use_aspect_ratio = not self.use_aspect_ratio
@@ -280,8 +283,10 @@ class GraphicsEngine3D:
         if self.clicking:
             if not self.delay:
                 self.builder.handle_click()
-                self.delay = 5
+                self.delay = 5            
         self.delay = max(0, self.delay - 0.06 * self.delta_time)
+        
+        
         
     def run(self):
         while True:

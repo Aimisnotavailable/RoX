@@ -50,6 +50,10 @@ class VoxelBuilder:
 
         # Debug flag: set True to render visited voxels or ray (requires extra debug draw code)
         self.debug_draw = False
+        self.snap_axis = (0, 0)
+        self._snapped_place_pos = (0, 0)
+        self.stop_raycast = False
+        self.sensitivity = 0.2
 
     # -------------------------
     # Model matrix used for rendering
@@ -192,28 +196,37 @@ class VoxelBuilder:
 
         # Main traversal loop
         while True:
-            # RTS ground plane check: compute t where ray crosses y = 0 (model-space ground)
-            if is_rts and direction.y < 0:
-                t_ground = (0.0 - origin.y) / direction.y
-                nearest_boundary_t = min(t_max_x, t_max_y, t_max_z)
-                if 0.0 <= t_ground <= nearest_boundary_t and t_ground <= max_dist:
-                    # Ground intersection occurs before any voxel boundary and within range
-                    gx = x
-                    gz = z
-                    # If there's a block exactly at ground voxel, prefer that block
-                    if (gx, 0, gz) in self.cubes:
-                        self.delete_pos = (gx, 0, gz)
-                        self.place_pos = last_pos
-                        return
-                    # Otherwise place on top of ground (y = 1)
-                    self.delete_pos = None
-                    self.place_pos = (gx, 1, gz)
-                    return
+            # # RTS ground plane check: compute t where ray crosses y = 0 (model-space ground)
+            # if is_rts and direction.y < 0:
+            #     t_ground = (0.0 - origin.y) / direction.y
+            #     nearest_boundary_t = min(t_max_x, t_max_y, t_max_z)
+            #     if 0.0 <= t_ground <= nearest_boundary_t and t_ground <= max_dist:
+            #         # Ground intersection occurs before any voxel boundary and within range
+            #         gx = x
+            #         gz = z
+            #         # If there's a block exactly at ground voxel, prefer that block
+            #         if (gx, 0, gz) in self.cubes:
+            #             self.delete_pos = (gx, 0, gz)
+            #             self.place_pos = last_pos
+            #             return
+            #         # Otherwise place on top of ground (y = 1)
+            #         self.delete_pos = None
+            #         self.place_pos = (gx, 0, gz)
+            #         return
 
             # If current voxel contains a block, we hit it
             if (x, y, z) in self.cubes:
                 self.delete_pos = (x, y, z)
                 self.place_pos = last_pos
+                if last_pos is None:
+                    # fallback: no last empty voxel recorded
+                    self.snap_axis = None
+                else:
+                    delta = (last_pos[0] - x, last_pos[1] - y, last_pos[2] - z)
+                    # choose axis with largest absolute delta (should be ±1)
+                    axis = max(range(3), key=lambda i: abs(delta[i]))
+                    sign = 1 if delta[axis] > 0 else -1 if delta[axis] < 0 else 0
+                    self.snap_axis = (axis, sign)
                 return
 
             # Stop if nearest boundary is beyond max distance
@@ -249,12 +262,45 @@ class VoxelBuilder:
                or was set by a valid ground hit (delete_pos is None but place_pos.y == 1).
         DELETE: delete hovered_block if present.
         """
+        # read mouse movement and clamp it to avoid huge jumps
+
+        if self.app.is_rts_mode and self.stop_raycast and self.place_pos is not None:
+            # ensure pos is a list of floats
+            pos = [float(self.place_pos[0]), float(self.place_pos[1]), float(self.place_pos[2])]
+            rel_x, rel_y = self.app.camera.mouse_rel
+
+            if getattr(self, 'snap_axis', None) is not None:
+                axis, sign = self.snap_axis
+
+                # choose which mouse axis to use for each snap axis
+                if axis == 0:   # x axis -> use horizontal mouse movement
+                    delta = -rel_x * self.sensitivity
+                elif axis == 1: # y axis -> use vertical mouse movement
+                    delta = rel_y * self.sensitivity
+                else:           # z axis -> use vertical mouse movement
+                    delta = -rel_y * self.sensitivity
+
+                # apply delta in the correct direction
+                pos[axis] -= delta * sign
+
+            # snap to nearest voxel (use round, not int)
+            snapped = [round(p) for p in pos]
+            self.place_pos = glm.vec3(pos[0], pos[1], pos[2])  # keep float for ghost movement
+            self._snapped_place_pos = tuple(int(v) for v in snapped)  # store integer candidate
+
         if self.mode == 'BUILD' and self.place_pos:
             # Allow placement only if adjacent to an existing block (delete_pos != None)
             # or if it was a valid ground placement (delete_pos is None and place_pos[1] == 1)
             if self.delete_pos is not None or (self.delete_pos is None and self.place_pos[1] == 1):
                 block_data = BLOCK_TYPES[self.current_block_index]
-                self.cubes[self.place_pos] = block_data['id']
+                if hasattr(self, '_snapped_place_pos'):
+                    place_pos_int = self._snapped_place_pos
+                else:
+                    place_pos_int = tuple(int(round(p)) for p in self.place_pos)
+
+                if not place_pos_int in self.cubes:
+                    self.cubes[place_pos_int] = block_data['id']
+
         elif self.mode == 'DELETE':
             if self.hovered_block:
                 self.cubes.pop(self.hovered_block, None)
@@ -292,7 +338,8 @@ class VoxelBuilder:
             # Mouse ray in world space -> transform to model/local space
             ray_origin_world, ray_direction_world = self.get_mouse_ray()
             local_origin, local_direction = self.world_to_model_ray(ray_origin_world, ray_direction_world)
-            self.raycast_rts(local_origin, local_direction)
+            if not self.stop_raycast:
+                self.raycast_rts(local_origin, local_direction)
         else:
             # FPS uses camera forward (world) -> transform to model/local space
             ray_origin_world = self.app.camera.position

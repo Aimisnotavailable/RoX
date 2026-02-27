@@ -206,6 +206,8 @@ class RTSCamera(Camera3D):
         # When basing RTS on FPS, this offset controls how high above the FPS eye we place the RTS camera
         self._height_offset = 12.0
 
+        self.mouse_rel = (0, 0)
+
     # -------------------------
     # Helper to base RTS on FPS
     # -------------------------
@@ -277,6 +279,7 @@ class RTSCamera(Camera3D):
         Update camera orientation and position each frame.
         Note: update_camera_vectors is called before move so movement uses current orientation.
         """
+        self.mouse_rel = pygame.mouse.get_rel()
         self.update_camera_vectors()
         self.move()
         self.m_view = glm.lookAt(self.position, self.position + self.forward, self.up)
