@@ -47,6 +47,16 @@ class VoxelBuilder:
             (0,0,1), (0,0,-1)
         ]
 
+        self.generate_iron_man_floor(50)
+
+    def generate_iron_man_floor(self, size=70):
+        # This creates 4,900 blocks (70x70)
+        for x in range(-size//2, size//2):
+            for z in range(-size//2, size//2):
+                # We use a simple sine wave to make it look "techy"
+                if (math.sin(x*0.2) + math.cos(z*0.2)) > 0.5:
+                    self.cubes[(x, 0, z)] = 4 # Stone/Tech block
+
     def get_model_matrix(self):
         model = glm.mat4(1.0)
         model = glm.rotate(model, self.rotation.y, glm.vec3(0.0, 1.0, 0.0))

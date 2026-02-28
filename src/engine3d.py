@@ -342,9 +342,13 @@ class GraphicsEngine3D:
         self.prog['m_view'].write(self.camera.m_view)
         self.prog['light_pos'].write(glm.vec3(0, 5, 5))
     
-    def render_feed_to_texture(self):
+    def render_feed_to_texture(self, fit_to_screen=False):
         if self.ar.image:
-            self.feed_surface.blit(pygame.transform.scale(self.ar.image, self.WIN_SIZE), (0, 0))
+            image = self.ar.image
+            if fit_to_screen:
+                image = pygame.transform.scale(self.ar.image, self.WIN_SIZE)
+
+            self.feed_surface.blit(image, (0, 0) if fit_to_screen else (self.WIN_SIZE[0] - image.get_width(), 0))
             img_flipped = pygame.transform.flip(self.feed_surface, False, True)
             data = pygame.image.tostring(img_flipped, 'RGB')
             self.feed_texture.write(data)
