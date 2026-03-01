@@ -6,6 +6,8 @@ import sys
 import random
 import time
 import glm
+import moderngl
+from PIL import Image
 
 from collections import deque, namedtuple
 from scripts.logger import get_logger_info

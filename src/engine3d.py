@@ -1,10 +1,4 @@
-import pygame
-import moderngl
-import sys
-import glm
-import math
-import random
-from PIL import Image
+from scripts.config import *
 from src.camera import FPSCamera, RTSCamera
 from src.mesh import CubeMesh
 from src.builder import VoxelBuilder
@@ -72,7 +66,8 @@ class GraphicsEngine3D:
         self.current_action_label = "" 
         
         # AR System
-        self.ar = AR()
+        self.cap = cv2.VideoCapture(0)
+        self.ar = AR(win_size)
         self.input_handler = ARInputHandler(self)
         
         # AR Interaction State
@@ -311,9 +306,48 @@ class GraphicsEngine3D:
         r_active = self.input_handler.right_state.active
         self.draw_dynamic_cursor(self.trails['right'], COLOR_BUILD, r_active)
 
+    def render_hands(self, surf):
+        if not self.ar.ar_data["HAND_PRESENCE"]:
+            get_logger_info('AR', f'[AR] FAILED TO DETECT HANDS', True)
+            return
+        
+        for label in ("LEFT", "RIGHT"):
+            pts = self.ar.ar_data['POSITION_DATA'][label]
+            # draw connections (only if we have enough points)
+            if pts:
+                try:
+                    max_idx = max(max(c) for c in self.ar.mp_hands.HAND_CONNECTIONS)
+                except Exception:
+                    max_idx = 0
+
+                if len(pts) > max_idx:
+                    for c in self.ar.mp_hands.HAND_CONNECTIONS:
+                        a_idx, b_idx = c[0], c[1]
+                        try:
+                            pygame.draw.line(surf, (0,0,255),
+                                            pts[a_idx], pts[b_idx], 1)
+                        except Exception:
+                            continue
+                
+                for pt in pts:
+                    try:
+                        pygame.draw.circle(surf, (255,255,255), center=pt, radius=2)
+                    except TypeError:
+                        pygame.draw.circle(surf, (255,255,255), center=(int(pt[0]), int(pt[1])), radius=2)
+
+                color = (200, 80, 80) if label == "LEFT" else (80, 80, 200)
+                p = pts[WRIST_IDX] if len(pts) > WRIST_IDX else max_idx
+                pygame.draw.circle(surf, color, p, 10, 2)
+                font = pygame.font.SysFont("Arial", 14)
+                txt = font.render(f"{label}", True, color)
+                surf.blit(txt, (max(0, p[0]-20), max(0, p[1]-30)))
+
     def update(self):
         # 1. Update AR State
-        self.input_handler.update(self.ar.ar_data)
+        ret, frame = self.cap.read()
+        if ret:
+            self.ar.update(frame)
+            self.input_handler.update(self.ar.ar_data)
         
         # 2. Camera Physics
         self.camera.update()
@@ -363,7 +397,7 @@ class GraphicsEngine3D:
         self.ui_surface.fill((0, 0, 0, 0)) 
         
         # 2. HAND DRAWING
-        self.ar.render(self.ui_surface) 
+        self.render_hands(self.ui_surface)
         
         # 3. HUD (Draws ON TOP of hands)
         self.render_hud()
