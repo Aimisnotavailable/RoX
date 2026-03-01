@@ -459,7 +459,6 @@ class AR:
                             break
                     # fallback to last entry even if ghost or partial
                     if last_real is None:
-                        ar_data["FRAME_TYPE"][label] = "GHOST"
                         last_real = hist[-1]["pts"]
                     else:
                         ar_data["FRAME_TYPE"][label] = "REAL"
@@ -497,7 +496,6 @@ class AR:
                             else:
                                 self._log('ERROR', f"PinchDetector missing label {label}", True)
                         # ensure AR output flags are cleared for this hand
-                        ar_data["FRAME_TYPE"][label] = "GHOST"
                         ar_data["CLICK_FLAG"][label] = False
                         ar_data["CLICK_DIST"][label] = 0
                         ar_data["SCALE"][label] = 1
@@ -524,6 +522,7 @@ class AR:
                             self.calculate_hand_points(ghost, label, is_generated=True)
                             self._log('CORE',
                                 f'GENERATED HAND FRAMES FOR {label} HAND_TRACKER={self.hands_tracker[label]}', True)
+                            ar_data["FRAME_TYPE"][label] = "GHOST"
                     else:
                         # if we've been absent for a long time, ensure histogram is small
                         if self.hands_tracker[label] >= self.absent_reset_threshold:
