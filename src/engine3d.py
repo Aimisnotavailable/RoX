@@ -307,33 +307,64 @@ class GraphicsEngine3D:
         self.draw_dynamic_cursor(self.trails['right'], COLOR_BUILD, r_active)
 
     def render_hands(self, surf):
-        if not self.ar.ar_data["HAND_PRESENCE"]:
-            get_logger_info('AR', f'[AR] FAILED TO DETECT HANDS', True)
+        """
+        Render hand landmarks stored in self.ar.ar_data onto the given pygame surface.
+        Expects POSITION_DATA entries to be lists of pixel tuples or the sentinel (-1,-1)
+        for invalid/missing joints. Uses self.ar.INVALID_POINT as the sentinel.
+        """
+        if not self.ar.ar_data.get("HAND_PRESENCE"):
+            get_logger_info('AR', '[AR] FAILED TO DETECT HANDS', True)
             return
-        
-        for label in ("LEFT", "RIGHT"):
-            pts = self.ar.ar_data['POSITION_DATA'][label]
-            # draw connections (only if we have enough points)
-            if pts:
-                try:
-                    max_idx = max(max(c) for c in self.ar.mp_hands.HAND_CONNECTIONS)
-                except Exception:
-                    max_idx = 0
 
-                if len(pts) > max_idx:
-                    for c in self.ar.mp_hands.HAND_CONNECTIONS:
-                        a_idx, b_idx = c[0], c[1]
+        INVALID = getattr(self.ar, "INVALID_POINT", (-1, -1))
+
+        # Try to obtain HAND_CONNECTIONS in a safe way
+        try:
+            HAND_CONNECTIONS = self.ar.mp_hands.HAND_CONNECTIONS
+        except Exception:
+            try:
+                from mediapipe.python.solutions.hands import HAND_CONNECTIONS
+            except Exception:
+                HAND_CONNECTIONS = [(0,1),(1,2),(2,3),(3,4),(0,5),(5,9),(9,13),(13,17),(17,0)]
+
+        for label in ("LEFT", "RIGHT"):
+            pts = self.ar.ar_data.get('POSITION_DATA', {}).get(label, [])
+            if not pts:
+                continue
+
+            # draw connections only if both endpoints are valid
+            # compute max index safely
+            try:
+                max_idx = max(max(c) for c in HAND_CONNECTIONS)
+            except Exception:
+                max_idx = -1
+
+            if len(pts) > max_idx:
+                for a_idx, b_idx in HAND_CONNECTIONS:
+                    # ensure indices exist
+                    if a_idx >= len(pts) or b_idx >= len(pts):
+                        continue
+                    pa = pts[a_idx]
+                    pb = pts[b_idx]
+                    # both endpoints must be valid (not sentinel and not None)
+                    if pa and pb and pa != INVALID and pb != INVALID:
                         try:
-                            pygame.draw.line(surf, (0,0,255),
-                                            pts[a_idx], pts[b_idx], 1)
+                            pygame.draw.line(surf, (0, 0, 255), (int(pa[0]), int(pa[1])), (int(pb[0]), int(pb[1])), 1)
                         except Exception:
+                            # defensive: skip any drawing errors
                             continue
-                
-                for pt in pts:
-                    try:
-                        pygame.draw.circle(surf, (255,255,255), center=pt, radius=2)
-                    except TypeError:
-                        pygame.draw.circle(surf, (255,255,255), center=(int(pt[0]), int(pt[1])), radius=2)
+
+            # draw landmark points (preserve index positions; skip invalids)
+            for p in pts:
+                if not p or p == INVALID:
+                    continue
+                try:
+                    cx = int(round(p[0])); cy = int(round(p[1]))
+                    pygame.draw.circle(surf, (255, 255, 255), (cx, cy), 2)
+                except Exception:
+                    # if p is malformed, skip it
+                    continue
+
 
                 color = (200, 80, 80) if label == "LEFT" else (80, 80, 200)
                 p = pts[WRIST_IDX] if len(pts) > WRIST_IDX else max_idx
