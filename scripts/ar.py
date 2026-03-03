@@ -96,7 +96,7 @@ class AR:
         )
 
         # pixel-space histogram for smoothing & ghost-frames
-        # store entries as dicts: {"pts": [(x,y),...], "source": "real"|"ghost", "ttl": int}
+        # store entries as dicts: {"pts": [(x,y),...], "source": "real"|"ghost", "frame": int, "gen_frame": int (for ghosts)}
         self.position_histogram = {'LEFT': [], 'RIGHT': []}
         # how many frames since last real detection for each hand
         self.hands_tracker     = {'LEFT': 0,      'RIGHT': 0     }
@@ -111,10 +111,11 @@ class AR:
         # shorter threshold specifically for resetting pinch state to avoid sticky pinches
         self.pinch_absent_reset = max(3, HISTOGRAM_SIZE // 2)
 
-        # ghost TTL default (frames). Each generated ghost entry gets this TTL and decrements each render.
-        self.ghost_ttl_default = max(1, HISTOGRAM_SIZE // 2)
+        # ghost TTL default (frames). Set to 3 as requested.
+        # This value now controls "max age since generation" for ghost entries.
+        self.ghost_ttl_default = 3
 
-        # our new pinch detector
+        # our pinch detector
         self.detector = PinchDetector()
 
         # diagnostic counters
@@ -240,14 +241,12 @@ class AR:
         entry = {
             "pts": pts,
             "source": self.SOURCE_GHOST if is_generated else self.SOURCE_REAL,
-            "ttl": None,
+            # 'frame' is the frame when this entry was created (real or ghost)
             "frame": self.frame_count
         }
-        # If the landmarks object provided a meta ttl (from generate_frames), use it
-        if is_generated and hasattr(landmarks, "_meta_ttl"):
-            entry["ttl"] = int(landmarks._meta_ttl)
-        else:
-            entry["ttl"] = self.ghost_ttl_default if is_generated else None
+        # For generated ghosts, also store generation frame explicitly (used for age-based pruning)
+        if is_generated:
+            entry["gen_frame"] = self.frame_count
 
         hist = self.position_histogram[label]
 
@@ -262,7 +261,7 @@ class AR:
                 # prune trailing ghosts so ghosts stop immediately
                 while len(hist) > 0 and hist[-1].get("source") == self.SOURCE_GHOST:
                     popped = hist.pop()
-                    self._log('DEBUG', f'PRUNED TRAILING GHOST FOR {label} TTL={popped.get("ttl")}', True)
+                    self._log('DEBUG', f'PRUNED TRAILING GHOST FOR {label} gen_frame={popped.get("gen_frame")} frame={popped.get("frame")}', True)
                 # append the real entry if we have at least one point (avoid appending empty pts lists)
                 if len(pts) >= 1:
                     if len(hist) < HISTOGRAM_SIZE:
@@ -285,25 +284,37 @@ class AR:
             else:
                 hist.pop(0)
                 hist.append(entry)
-            self._log('CORE', f'APPENDED GHOST FOR {label} TTL={entry["ttl"]}', True)
+            self._log('CORE', f'APPENDED GHOST FOR {label} gen_frame={entry.get("gen_frame")} frame={entry.get("frame")}', True)
+        
+        return pts
 
     def _decrement_and_prune_ghosts(self, label):
         """
-        Decrement TTL for ghost entries and remove any with ttl <= 0.
-        Also ensure histogram length does not exceed HISTOGRAM_SIZE.
+        Age-based pruning for ghost entries.
+
+        Instead of per-entry TTL counters, remove any ghost entries that are older
+        than `self.ghost_ttl_default` frames since their generation. This ensures
+        ghosts only persist for a small number of frames (e.g., 2-3) after creation.
         """
         hist = self.position_histogram[label]
         changed = False
-        # iterate and decrement TTL for ghosts
+
+        # Remove ghosts that are older than allowed age (age measured from gen_frame)
         for e in hist[:]:
             if e.get("source") == self.SOURCE_GHOST:
-                if e.get("ttl") is None:
-                    e["ttl"] = self.ghost_ttl_default
-                e["ttl"] -= 1
-                if e["ttl"] <= 0:
-                    hist.remove(e)
-                    changed = True
-                    self._log('DEBUG', f'GHOST TTL EXPIRED FOR {label}', True)
+                gen_frame = e.get("gen_frame", e.get("frame", None))
+                if gen_frame is None:
+                    # if no gen_frame, fall back to entry frame
+                    gen_frame = e.get("frame", self.frame_count)
+                age = self.frame_count - int(gen_frame)
+                if age >= int(self.ghost_ttl_default):
+                    try:
+                        hist.remove(e)
+                        changed = True
+                        self._log('DEBUG', f'PRUNED GHOST DUE TO AGE FOR {label} gen_frame={gen_frame} age={age}', True)
+                    except ValueError:
+                        pass
+
         # enforce max length
         while len(hist) > HISTOGRAM_SIZE:
             hist.pop(0)
@@ -322,16 +333,23 @@ class AR:
             ang -= 2 * math.pi
         return ang
 
-    def calculate_velocity(self, label, dir=0, window=2, max_disp=80, max_ang=0.9):
+    # -------------------------
+    # Improved velocity estimator
+    # -------------------------
+    def calculate_velocity(self, label, dir=0, window=3, blend=0.8):
         """
-        Returns either scalar speed (dir=0) or [dx,dy, dtheta] per-frame (dir=1).
-        - dx,dy: per-frame wrist translation (pixels/frame)
-        - dtheta: per-frame angular rotation (radians/frame), positive = CCW
+        Improved velocity estimator with acceleration-based prediction.
+
+        - window: number of valid frames to use (default 3).
+        - blend: how strongly to trust the predicted velocity vs. the last measured velocity (0..1).
+        Returns:
+          - if dir==1: [pred_dx, pred_dy, pred_dtheta] (per-frame deltas)
+          - else: predicted scalar speed (pixels/frame)
         """
         hist = self.position_histogram[label]
+        # collect up to `window` valid entries with wrist and middle_mcp
         valid = []
         frames = []
-        # collect last `window` entries with valid wrist and middle_mcp
         for e in reversed(hist):
             pts = e.get("pts", [])
             if isinstance(pts, list) and len(pts) > max(WRIST_IDX, MIDDLE_MCP_IDX):
@@ -343,69 +361,191 @@ class AR:
                     if len(valid) >= window:
                         break
 
-        if len(valid) >= 2:
-            # newest = valid[0], previous = valid[1]
-            (w_new, m_new) = valid[0]
-            (w_old, m_old) = valid[1]
-            f_new = frames[0]; f_old = frames[1]
-            df = max(1, f_new - f_old)
+        # need at least two frames to compute velocity
+        if len(valid) < 2:
+            return [0.0, 0.0, 0.0] if dir else 0.0
 
-            # linear per-frame translation (wrist)
-            dx = (w_new[0] - w_old[0]) / df
-            dy = (w_new[1] - w_old[1]) / df
+        # compute per-interval velocities and angular velocities
+        lin_vels = []   # list of (vx, vy) per-frame
+        ang_vels = []   # list of dtheta per-frame
+        time_deltas = []
 
-            # angular per-frame rotation around wrist using middle mcp vector
+        for i in range(len(valid) - 1):
+            # newest = valid[i], previous = valid[i+1] because we iterated reversed
+            (w_new, m_new) = valid[i]
+            (w_old, m_old) = valid[i + 1]
+            f_new = frames[i]; f_old = frames[i + 1]
+            df = max(1, f_new - f_old)  # frames between samples
+
+            vx = (w_new[0] - w_old[0]) / df
+            vy = (w_new[1] - w_old[1]) / df
+
+            # angular velocity: angle between middle_mcp vectors
             v_new = (m_new[0] - w_new[0], m_new[1] - w_new[1])
             v_old = (m_old[0] - w_old[0], m_old[1] - w_old[1])
-            # if either vector is degenerate, fallback to zero rotation
             if (v_new[0] == 0 and v_new[1] == 0) or (v_old[0] == 0 and v_old[1] == 0):
                 dtheta = 0.0
             else:
                 raw_ang = self._angle_between(v_old, v_new)
                 raw_ang = self._normalize_angle(raw_ang)
-                dtheta = raw_ang / df  # radians per frame
+                dtheta = raw_ang / df
 
-            # clamp translation and angular velocity
-            mag = math.hypot(dx, dy)
-            if mag > max_disp:
-                scale = max_disp / mag
-                dx *= scale; dy *= scale
+            lin_vels.append((vx, vy))
+            ang_vels.append(dtheta)
+            time_deltas.append(df)
 
-            if abs(dtheta) > max_ang:
-                dtheta = math.copysign(max_ang, dtheta)
+        # if only one interval, fallback to that velocity
+        if len(lin_vels) == 1:
+            last_vx, last_vy = lin_vels[0]
+            last_dtheta = ang_vels[0]
+            if dir:
+                return [last_vx, last_vy, last_dtheta]
+            return math.hypot(last_vx, last_vy)
 
-            self._log('DEBUG', f"[AR] calc_vel {label} dx={dx:.2f} dy={dy:.2f} dtheta={dtheta:.3f}", True)
-            return [dx, dy, dtheta] if dir else math.hypot(dx, dy)
+        # compute average velocity and acceleration (simple finite differences)
+        # velocities are ordered newest->older in lin_vels because valid was newest first
+        # reverse to chronological order oldest->newest for acceleration calc
+        lin_vels_chrono = list(reversed(lin_vels))
+        ang_vels_chrono = list(reversed(ang_vels))
 
-        return [0.0, 0.0, 0.0] if dir else 0.0
+        # last measured velocity (most recent)
+        last_vx, last_vy = lin_vels_chrono[-1]
+        last_dtheta = ang_vels_chrono[-1]
 
+        # compute acceleration as difference between last two measured velocities
+        prev_vx, prev_vy = lin_vels_chrono[-2]
+        prev_dtheta = ang_vels_chrono[-2]
 
+        ax = last_vx - prev_vx
+        ay = last_vy - prev_vy
+        adtheta = last_dtheta - prev_dtheta
 
-    def generate_frames(self, velocity, label, max_jump=120, lerp_alpha=0.35):
+        # predicted next velocity (per-frame)
+        pred_vx = last_vx + ax
+        pred_vy = last_vy + ay
+        pred_dtheta = last_dtheta + adtheta
+
+        # optional smoothing/blending to avoid overshoot
+        pred_vx = last_vx * (1.0 - blend) + pred_vx * blend
+        pred_vy = last_vy * (1.0 - blend) + pred_vy * blend
+        pred_dtheta = last_dtheta * (1.0 - blend) + pred_dtheta * blend
+
+        # log for debugging
+        self._log('DEBUG', f"[AR] predict_vel {label} last=({last_vx:.2f},{last_vy:.2f},{last_dtheta:.3f}) "
+                           f"acc=({ax:.2f},{ay:.2f},{adtheta:.3f}) pred=({pred_vx:.2f},{pred_vy:.2f},{pred_dtheta:.3f})", True)
+
+        if dir:
+            return [pred_vx, pred_vy, pred_dtheta]
+        return math.hypot(pred_vx, pred_vy)
+
+    # -------------------------
+    # Handedness reconciliation
+    # -------------------------
+    def _last_real_wrist(self, label):
+        """Return last real wrist point (x,y) or None."""
+        hist = self.position_histogram.get(label, [])
+        # iterate from newest to oldest for first REAL source
+        for e in reversed(hist):
+            if e.get("source") == self.SOURCE_REAL:
+                pts = e.get("pts", [])
+                if isinstance(pts, list) and len(pts) > WRIST_IDX:
+                    w = pts[WRIST_IDX]
+                    if w and w != self.INVALID_POINT:
+                        return (float(w[0]), float(w[1]))
+        return None
+
+    def _normalize_ghost_genframes(self, label):
+        """
+        Ensure ghost entries have a gen_frame and that it's not absurdly old.
+        This helps after swaps so ghosts don't persist unexpectedly.
+        """
+        hist = self.position_histogram.get(label, [])
+        for e in hist:
+            if e.get("source") == self.SOURCE_GHOST:
+                if e.get("gen_frame") is None:
+                    e["gen_frame"] = e.get("frame", self.frame_count)
+                # clamp gen_frame to not be older than current frame
+                if e["gen_frame"] > self.frame_count:
+                    e["gen_frame"] = self.frame_count
+
+    def _swap_hand_state(self, a_label, b_label):
+        """Swap all per-hand state between two labels."""
+        # swap histograms
+        self.position_histogram[a_label], self.position_histogram[b_label] = \
+            self.position_histogram[b_label], self.position_histogram[a_label]
+        # swap trackers and counters
+        self.hands_tracker[a_label], self.hands_tracker[b_label] = \
+            self.hands_tracker[b_label], self.hands_tracker[a_label]
+        self.presence_counter[a_label], self.presence_counter[b_label] = \
+            self.presence_counter[b_label], self.presence_counter[a_label]
+        # swap detector state if present
+        if a_label in self.detector.hands and b_label in self.detector.hands:
+            ha = self.detector.hands[a_label]
+            hb = self.detector.hands[b_label]
+            self.detector.hands[a_label], self.detector.hands[b_label] = hb, ha
+        else:
+            # safe fallback: ensure both exist
+            for L in (a_label, b_label):
+                if L not in self.detector.hands:
+                    self.detector.hands[L] = HandState(deque(maxlen=HISTOGRAM_SIZE), 0, False)
+        # normalize ghost gen frames after swap
+        self._normalize_ghost_genframes(a_label)
+        self._normalize_ghost_genframes(b_label)
+
+    def _reconcile_handedness(self, detections):
+        """
+        detections: list of tuples (label_str, wrist_px_or_None, landmark_obj)
+        wrist_px_or_None = (x_px, y_px) or None if not available yet.
+        """
+        # build last-known wrists
+        tracked = {lbl: self._last_real_wrist(lbl) for lbl in ("LEFT","RIGHT")}
+        # build distance matrix
+        pairs = []  # (det_idx, tracked_label, dist)
+        for i, (det_label, wrist_pt, lm_obj) in enumerate(detections):
+            if wrist_pt is None:
+                continue
+            for tlabel, tpt in tracked.items():
+                if tpt is None:
+                    continue
+                dx = wrist_pt[0] - tpt[0]; dy = wrist_pt[1] - tpt[1]
+                pairs.append((i, tlabel, math.hypot(dx, dy)))
+
+        # greedy match: for small number of hands this is fine
+        assigned = {}  # det_idx -> tracked_label
+        used_tracked = set()
+        pairs.sort(key=lambda x: x[2])  # smallest distance first
+        MAX_MATCH_DIST = max(self.W, self.H) * 0.15  # tuneable threshold (15% of larger dim)
+        for det_idx, tlabel, dist in pairs:
+            if det_idx in assigned or tlabel in used_tracked:
+                continue
+            if dist <= MAX_MATCH_DIST:
+                assigned[det_idx] = tlabel
+                used_tracked.add(tlabel)
+
+        # Now check for swaps: if a detection's MediaPipe label != assigned tracked label, swap states
+        for i, (det_label, wrist_pt, lm_obj) in enumerate(detections):
+            if i not in assigned:
+                continue
+            matched_label = assigned[i]
+            if det_label != matched_label:
+                # swap the internal state so that the detection's label aligns with the tracked history
+                self._log('CORE', f"HANDEDNESS SWAP: detection {i} labeled {det_label} matches {matched_label}", True)
+                self._swap_hand_state(det_label, matched_label)
+
+    # -------------------------
+    # Fixed generate_frames
+    # -------------------------
+    def generate_frames(self, velocity, label):
         """
         Generate ghost landmarks by applying rotation about wrist + translation.
         velocity: [dx,dy,dtheta] per-frame deltas (pixels/frame, radians/frame).
         """
         hist = self.position_histogram[label]
-        base_entry = None
-        # prefer newest REAL entry
-        for e in reversed(hist):
-            if e.get("source") == self.SOURCE_REAL and e.get("pts"):
-                if any((p and p != self.INVALID_POINT) for p in e["pts"]):
-                    base_entry = e
-                    break
-        # fallback to last entry only if recent
-        if base_entry is None and hist:
-            last = hist[-1]
-            if (self.frame_count - int(last.get("frame", self.frame_count))) <= 2 and any((p and p != self.INVALID_POINT) for p in last.get("pts", [])):
-                base_entry = last
-
-        if base_entry is None:
-            self._log('DEBUG', f'NO VALID BASE FOR GHOST GENERATION FOR {label}', True)
-            return None
-
-        base_pts = base_entry["pts"]
-        base_frame = int(base_entry.get("frame", self.frame_count))
+        
+        if len(hist) > 0 :
+            base_pts = hist[-1].get("pts", []) or []
+        else:
+            base_pts = []
 
         class LM:
             def __init__(self,x,y):
@@ -424,7 +564,7 @@ class AR:
 
         # compute base wrist if available
         base_wrist = None
-        if len(base_pts) > WRIST_IDX:
+        if isinstance(base_pts, list) and len(base_pts) > WRIST_IDX:
             w = base_pts[WRIST_IDX]
             if w and w != self.INVALID_POINT:
                 base_wrist = (float(w[0]), float(w[1]))
@@ -438,7 +578,10 @@ class AR:
             ry = x * s + y * c
             return (rx + cx, ry + cy)
 
-        # apply transform to each base point
+        # smoothing factor for lerp (0..1). 0 => keep original, 1 => full transform
+        smooth = 0.5
+        max_jump = max(self.W, self.H) * 0.5
+
         for p in base_pts:
             if not p or p == self.INVALID_POINT:
                 gen.add(float(self.INVALID_POINT[0]), float(self.INVALID_POINT[1]))
@@ -447,40 +590,72 @@ class AR:
             if base_wrist is not None:
                 # rotate around wrist by dtheta, then translate by dx,dy
                 rx, ry = rotate_point(px, py, base_wrist[0], base_wrist[1], dtheta)
-                new_x = rx + dx
-                new_y = ry + dy
+                transformed_x = rx + dx
+                transformed_y = ry + dy
 
-                # check wrist jump magnitude and lerp if too large
-                proposed_wrist_x, proposed_wrist_y = rotate_point(base_wrist[0], base_wrist[1], base_wrist[0], base_wrist[1], dtheta)
-                proposed_wrist_x += dx; proposed_wrist_y += dy
-                jump = math.hypot(proposed_wrist_x - base_wrist[0], proposed_wrist_y - base_wrist[1])
+                # limit huge jumps by clamping the translation component
+                jump = math.hypot(transformed_x - px, transformed_y - py)
                 if jump > max_jump:
                     scale = max_jump / jump
-                    new_x = px + (new_x - px) * scale
-                    new_y = py + (new_y - py) * scale
+                    transformed_x = px + (transformed_x - px) * scale
+                    transformed_y = py + (transformed_y - py) * scale
 
-                # lerp to smooth sudden changes
-                new_x = px * (1.0 - lerp_alpha) + new_x * lerp_alpha
-                new_y = py * (1.0 - lerp_alpha) + new_y * lerp_alpha
+                # proper lerp between original and transformed point
+                new_x = px * (1.0 - smooth) + transformed_x * smooth
+                new_y = py * (1.0 - smooth) + transformed_y * smooth
             else:
-                # no wrist: fallback to simple translate
-                new_x = px + dx
-                new_y = py + dy
+                # no wrist: fallback to simple translate with smoothing
+                transformed_x = px + dx
+                transformed_y = py + dy
+                new_x = px * (1.0 - smooth) + transformed_x * smooth
+                new_y = py * (1.0 - smooth) + transformed_y * smooth
 
-            gen.add(new_x, new_y)
+            # final defensive clamp to finite numbers
+            if not (math.isfinite(new_x) and math.isfinite(new_y)):
+                gen.add(float(self.INVALID_POINT[0]), float(self.INVALID_POINT[1]))
+            else:
+                gen.add(new_x, new_y)
 
-        # adaptive TTL based on angular+linear speed
+        # adaptive TTL is now interpreted as "max ghost age in frames"
         lin_speed = math.hypot(dx, dy)
         ang_speed = abs(dtheta)
-        # combine heuristics: faster motion -> shorter TTL
-        speed_factor = lin_speed + (ang_speed * 50.0)  # scale angular to pixel-like magnitude
-        adaptive_ttl = int(max(1, min(self.ghost_ttl_default * 3, self.ghost_ttl_default * (1.0 / (0.01 + speed_factor)))))
+        speed_factor = lin_speed + (ang_speed * 50.0)
+        # we bias toward short-lived ghosts; keep adaptive logic but ensure small range
+        min_ttl = 1
+        max_ttl = max(1, int(self.ghost_ttl_default))
+        # faster motion -> shorter age; slower motion -> allow up to ghost_ttl_default
+        adaptive_age = int(max(min_ttl, min(max_ttl, self.ghost_ttl_default // (1 + int(speed_factor)))))
+        # store generation frame on the generated object (calculate_hand_points will copy it)
+        gen._meta_gen_frame = self.frame_count
+        gen._meta_age = adaptive_age
 
-        gen._meta_ttl = adaptive_ttl
-        gen._meta_base_frame = base_frame
-
-        self._log('DEBUG', f"[AR] GENERATED GHOST {label} lin={lin_speed:.2f} ang={ang_speed:.3f} ttl={adaptive_ttl}", True)
+        self._log('DEBUG', f"[AR] GENERATED GHOST {label} lin={lin_speed:.2f} ang={ang_speed:.3f} age={adaptive_age}", True)
         return gen
+
+    def _prune_ghosts_on_real(self, label, keep_recent_frames=1):
+        """
+        When a real detection arrives for `label`, aggressively remove trailing ghosts
+        and any ghosts older than `keep_recent_frames` frames relative to the current frame.
+        """
+        hist = self.position_histogram[label]
+        if not hist:
+            return False
+        changed = False
+        # Remove trailing ghosts immediately
+        while len(hist) > 0 and hist[-1].get("source") == self.SOURCE_GHOST:
+            hist.pop()
+            changed = True
+            self._log('DEBUG', f'PRUNED TRAILING GHOST ON REAL FOR {label}', True)
+        # Remove ghosts that are older than keep_recent_frames
+        cutoff_frame = self.frame_count - keep_recent_frames
+        for e in hist[:]:
+            if e.get("source") == self.SOURCE_GHOST:
+                gen_frame = e.get("gen_frame", e.get("frame", 0))
+                if gen_frame < cutoff_frame:
+                    hist.remove(e)
+                    changed = True
+                    self._log('DEBUG', f'PRUNED OLD GHOST ON REAL FOR {label} gen_frame={gen_frame}', True)
+        return changed
 
     def cvimage_to_pygame(self, image):
         """Convert cv2 image into a pygame surface"""
@@ -528,14 +703,33 @@ class AR:
         # keep track of which hands appear
         seen = []
 
-        # decrement ghost TTLs each frame and prune expired ghosts
+        # age-prune ghost entries each frame (remove ghosts older than ghost_ttl_default)
         for label in ("LEFT", "RIGHT"):
             self._decrement_and_prune_ghosts(label)
 
+        # If we have detections, build a small detection list (label, wrist_px, lm_set)
+        detections = []
         if getattr(res, 'multi_hand_landmarks', None):
-            for lm_set, handedness in zip(res.multi_hand_landmarks,
-                                          res.multi_handedness):
+            for lm_set, handedness in zip(res.multi_hand_landmarks, res.multi_handedness):
                 label = handedness.classification[0].label.upper()
+                # attempt to extract wrist pixel quickly for matching
+                try:
+                    lm_w = lm_set.landmark[WRIST_IDX]
+                    lx = float(lm_w.x); ly = float(lm_w.y)
+                    if self._is_normalized(lx, ly):
+                        wrist_px = (lx * self.W, ly * self.H)
+                    else:
+                        wrist_px = (lx, ly)
+                except Exception:
+                    wrist_px = None
+                detections.append((label, wrist_px, lm_set))
+
+            # reconcile handedness before updating per-detection state
+            if len(detections) > 0:
+                self._reconcile_handedness(detections)
+
+            # now process detections (after possible swaps)
+            for i, (label, wrist_px, lm_set) in enumerate(detections):
                 seen.append(label)
 
                 # 1) pinch detection on normalized coords
@@ -548,41 +742,51 @@ class AR:
 
                 # 2) draw & update pixel histogram
                 # pass is_generated=False for real detections
-                self.calculate_hand_points(lm_set, label, is_generated=False)
+                pts = self.calculate_hand_points(lm_set, label, is_generated=False)
 
-                # 3) fill AR output
-                # position data should be pixel-space pts from the last real entry
-                hist = self.position_histogram[label]
-                if hist:
-                    # prefer most recent real pts
-                    last_real = None
-                    for e in reversed(hist):
-                        if e.get("source") == self.SOURCE_REAL and e.get("pts"):
-                            last_real = e["pts"]
-                            break
-                    # fallback to last entry even if ghost or partial
-                    if last_real is None:
-                        last_real = hist[-1]["pts"]
-                    else:
-                        ar_data["FRAME_TYPE"][label] = "REAL"
-                    ar_data["POSITION_DATA"][label] = last_real
-                else:
-                    # keep previous ar_data value (avoid overwriting with empty)
+                # Aggressively prune ghosts now that a real frame arrived
+                try:
+                    self._prune_ghosts_on_real(label)
+                except Exception:
                     pass
 
-                ar_data["SCALE"][label]         = d["scale"]
-                ar_data["CLICK_DIST"][label]    = d["rel_dist"]
-                ar_data["CLICK_FLAG"][label]    = d["is_pinched"]
+                # 3) fill AR output - REAL frames
+                ar_data["POSITION_DATA"][label] = pts
+                ar_data["FRAME_TYPE"][label] = "REAL"
+                ar_data["SCALE"][label] = d["scale"]
+                ar_data["CLICK_DIST"][label] = d["rel_dist"]
+                ar_data["CLICK_FLAG"][label] = d["is_pinched"]
 
                 # reset hands_tracker for this label (we saw a real hand)
                 self.hands_tracker[label] = 0
 
-            # ghost frames for missing hands
+            # handle missing hands (generate ghost frames as predictions)
             for label in ("LEFT","RIGHT"):
                 if label not in seen:
                     self.hands_tracker[label] += 1
                     # decrement presence counter on missing frames
                     self.presence_counter[label] = max(self.presence_threshold_off, self.presence_counter[label] - 1)
+                    # Generate ghost frames as predictions
+                    ghost_pts = []
+                    if (len(self.position_histogram[label]) >= 1 and 
+                        self.hands_tracker[label] < self.absent_reset_threshold):
+                        vel = self.calculate_velocity(label, dir=1)
+                        ghost = self.generate_frames(vel, label)
+                        if ghost is not None:
+                            # ensure generated object carries gen_frame info into histogram entry
+                            # calculate_hand_points will set gen_frame based on current frame
+                            ghost_pts = self.calculate_hand_points(ghost, label, is_generated=True)
+                            self._log('CORE',
+                                f'GENERATED GHOST FOR {label} HAND_TRACKER={self.hands_tracker[label]}', True)
+                    
+                    # For ghost frames: set FRAME_TYPE to GHOST but STILL provide position data
+                    ar_data["FRAME_TYPE"][label] = "GHOST"
+                    ar_data["POSITION_DATA"][label] = ghost_pts
+                    
+                    # Clear click flags for ghost frames (can't click with predicted hands)
+                    ar_data["CLICK_FLAG"][label] = False
+                    ar_data["CLICK_DIST"][label] = 0
+                    ar_data["SCALE"][label] = 1
 
                     # If the hand has been missing for a while, reset pinch detector state and clear history
                     if self.hands_tracker[label] >= self.absent_reset_threshold:
@@ -598,45 +802,29 @@ class AR:
                                 self.detector.hands[label] = HandState(hs.pos_hist, 0, False)
                             else:
                                 self._log('ERROR', f"PinchDetector missing label {label}", True)
-                        # ensure AR output flags are cleared for this hand
-                        ar_data["CLICK_FLAG"][label] = False
-                        ar_data["CLICK_DIST"][label] = 0
-                        ar_data["SCALE"][label] = 1
-
-                    # If the hand has been missing for pinch_absent_reset frames, reset pinch to avoid sticky pinches
-                    if self.hands_tracker[label] >= self.pinch_absent_reset:
-                        try:
-                            self.detector.reset(label)
-                        except Exception:
-                            if label in self.detector.hands:
-                                hs = self.detector.hands[label]
-                                self.detector.hands[label] = HandState(hs.pos_hist, 0, False)
-                            else:
-                                self._log('ERROR', f"PinchDetector missing label {label}", True)
-                        ar_data["CLICK_FLAG"][label] = False
-
-                    # only generate ghosts if we have at least one real base and haven't exceeded lifetime
-                    if (len(self.position_histogram[label]) >= 1):
-                        vel = self.calculate_velocity(label, dir=1)
-                        ghost = self.generate_frames(vel, label)
-                        # render ghost frames and mark as generated (only if ghost is valid)
-                        if ghost is not None:
-                            self.calculate_hand_points(ghost, label, is_generated=True)
-                            self._log('CORE',
-                                f'GENERATED HAND FRAMES FOR {label} HAND_TRACKER={self.hands_tracker[label]}', True)
-                        ar_data["FRAME_TYPE"][label] = "GHOST"
-                    else:
-                        # if we've been absent for a long time, ensure histogram is small
-                        if self.hands_tracker[label] >= self.absent_reset_threshold:
-                            if len(self.position_histogram[label]) > 0:
-                                self._log('CORE', f'CLEARING HISTOGRAM FOR {label} DUE TO LONG ABSENCE {self.hands_tracker[label]}', True)
-                                self.position_histogram[label].clear()
         else:
             self._log('ERROR', 'NO HANDS DETECTED', True)
             for label in ("LEFT","RIGHT"):
                 self.hands_tracker[label] += 1
                 # decrement presence counter on missing frames
                 self.presence_counter[label] = max(self.presence_threshold_off, self.presence_counter[label] - 1)
+
+                # Generate ghost frames as predictions when no hands detected
+                ghost_pts = []
+                if (len(self.position_histogram[label]) >= 1 and 
+                    self.hands_tracker[label] < self.absent_reset_threshold):
+                    vel = self.calculate_velocity(label, dir=1)
+                    ghost = self.generate_frames(vel, label)
+                    if ghost is not None:
+                        ghost_pts = self.calculate_hand_points(ghost, label, is_generated=True)
+                        self._log('CORE', f'GENERATED GHOST FOR {label} (no hands detected)', True)
+                
+                # All frames are ghost frames when no detection, but still provide position data
+                ar_data["FRAME_TYPE"][label] = "GHOST"
+                ar_data["POSITION_DATA"][label] = ghost_pts
+                ar_data["CLICK_FLAG"][label] = False
+                ar_data["CLICK_DIST"][label] = 0
+                ar_data["SCALE"][label] = 1
 
                 # If the hand has been missing for a while, reset pinch detector state and clear history
                 if self.hands_tracker[label] >= self.absent_reset_threshold:
@@ -651,23 +839,12 @@ class AR:
                             self.detector.hands[label] = HandState(hs.pos_hist, 0, False)
                         else:
                             self._log('ERROR', f"PinchDetector missing label {label}", True)
-                    ar_data["CLICK_FLAG"][label] = False
-                    ar_data["CLICK_DIST"][label] = 0
-                    ar_data["SCALE"][label] = 1
-
-                # if we have recent history and haven't exceeded ghost lifetime, generate ghosts
-                if (len(self.position_histogram[label]) >= 1):
-                    vel = self.calculate_velocity(label, dir=1)
-                    ghost = self.generate_frames(vel, label)
-                    if ghost is not None:
-                        self.calculate_hand_points(ghost, label, is_generated=True)
-                    ar_data["FRAME_TYPE"][label] = "GHOST"
-                else:
-                    # no hands detected at all
-                    pass
 
         # determine HAND_PRESENCE using presence_counter hysteresis (per-frame)
         ar_data["HAND_PRESENCE"] = any(self.presence_counter[label] >= self.presence_threshold_on for label in ("LEFT","RIGHT"))
+
+        # debug: log ghost counts
+        self._log('DEBUG', f"[AR] GHOST_COUNTS L={sum(1 for e in self.position_histogram['LEFT'] if e['source']=='ghost')} R={sum(1 for e in self.position_histogram['RIGHT'] if e['source']=='ghost')}", True)
 
         self.ar_data = ar_data
         return ar_data
