@@ -38,7 +38,7 @@ class VoxelBuilder:
         self.snap_axis = (0, 0)
         self._snapped_place_pos = (0, 0, 0)
         self.stop_raycast = False
-        self.sensitivity = 0.2
+        self.sensitivity = 0.05
         
         # New: Neighbors offset list for fast checking
         self.neighbor_offsets = [

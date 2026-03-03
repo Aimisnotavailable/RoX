@@ -243,68 +243,120 @@ class GraphicsEngine3D:
         pygame.draw.circle(self.ui_surface, color, (int(current_pos[0]), int(current_pos[1])), radius, width)
 
     def render_hud(self):
-        # 1. Zoom Line (Draw this first so text is on top)
-        if self.zoom_line_visible:
-            l_pos, r_pos = self.zoom_line_coords
-            start_pos = (int(l_pos[0]), int(l_pos[1]))
-            end_pos = (int(r_pos[0]), int(r_pos[1]))
-            
-            # Draw Main Beam
-            pygame.draw.line(self.ui_surface, COLOR_ZOOM, start_pos, end_pos, 4)
-            # Draw Glow
-            pygame.draw.line(self.ui_surface, (255, 255, 200, 100), start_pos, end_pos, 8)
-            
-            mid_x = (start_pos[0] + end_pos[0]) // 2
-            mid_y = (start_pos[1] + end_pos[1]) // 2
-            text_surf = self.font.render(f"{self.zoom_pct_display}%", True, COLOR_ZOOM)
-            self.ui_surface.blit(text_surf, (mid_x - 20, mid_y - 40))
 
-        # 2. Action Badge
-        if self.current_action_label:
-            color = COLOR_TEXT
-            if self.current_action_label == "ZOOMING": color = COLOR_ZOOM
-            elif self.current_action_label == "ROTATING": color = COLOR_ROTATE
-            elif self.current_action_label == "BUILDING": color = COLOR_BUILD
-            
-            txt_surf = self.font_large.render(self.current_action_label, True, color)
-            x_pos = (self.WIN_SIZE[0] - txt_surf.get_width()) // 2
-            shadow_surf = self.font_large.render(self.current_action_label, True, (0,0,0))
-            self.ui_surface.blit(shadow_surf, (x_pos+2, 52))
-            self.ui_surface.blit(txt_surf, (x_pos, 50))
-
-        # 3. Block Info
-        current_data = BLOCK_TYPES[self.builder.current_block_index]
-        block_name = current_data['name']
-        pygame.draw.rect(self.ui_surface, COLOR_UI_BG, (10, 80, 200, 35), border_radius=5)
-        text_surf = self.font.render(f"Block: {block_name}", True, COLOR_TEXT)
-        self.ui_surface.blit(text_surf, (20, 86))
-
-        # 4. FPS & Mode
-        fps_text = f"FPS: {int(self.clock.get_fps())}"
-        mode_text = f"Mode: {'AR / RTS' if self.is_rts_mode else 'FPS'}"
-        box_w = 220
-        box_h = 60
-        x_base = self.WIN_SIZE[0] - box_w - 10
-        pygame.draw.rect(self.ui_surface, COLOR_UI_BG, (x_base, 10, box_w, box_h), border_radius=5)
-        self.ui_surface.blit(self.font.render(fps_text, True, COLOR_ZOOM), (x_base + 10, 15))
-        self.ui_surface.blit(self.font.render(mode_text, True, COLOR_TEXT), (x_base + 10, 40))
-
-        # 5. Compass
-        cx, cy = 60, self.WIN_SIZE[1] - 60
-        radius = 30
-        pygame.draw.circle(self.ui_surface, COLOR_UI_BG, (cx, cy), radius)
-        pygame.draw.circle(self.ui_surface, (200, 200, 200), (cx, cy), radius, 2)
-        angle = self.builder.rotation.y
-        end_x = cx + math.sin(angle) * radius
-        end_y = cy + math.cos(angle) * radius 
-        pygame.draw.line(self.ui_surface, (255, 50, 50), (cx, cy), (end_x, end_y), 3)
-        self.ui_surface.blit(self.font.render("N", True, (255, 50, 50)), (end_x-5, end_y-10))
+        self._draw_status_panel(self.ui_surface) # Existing
+        self._draw_hotbar(self.ui_surface)       # Existing
         
-        # 6. Cursors
-        l_active = self.input_handler.left_state.active
-        self.draw_dynamic_cursor(self.trails['left'], COLOR_ROTATE, l_active)
-        r_active = self.input_handler.right_state.active
-        self.draw_dynamic_cursor(self.trails['right'], COLOR_BUILD, r_active)
+        # --- The "AR Stuff" ---
+        self._draw_ar_status(self.ui_surface)    # NEW: Hand tracking info
+        self._draw_compass(self.ui_surface)      # NEW: Orientation info
+
+        # Upload and render to OpenGL
+        texture_data = pygame.image.tostring(self.ui_surface, "RGBA", True)
+        self.ui_texture.write(texture_data)
+
+    def _draw_ar_status(self, surface):
+        # Position: Top Right
+        x, y = self.WIN_SIZE[0] - 270, 20
+        panel_rect = pygame.Rect(x, y, 250, 100)
+        pygame.draw.rect(surface, COLOR_PANEL_BG, panel_rect, border_radius=10)
+
+        # Fetch data from arinput/ar
+        ar_data = self.ar.ar_data # Or wherever you store the latest update
+        
+        # Hand presence "Signal" lights
+        for i, label in enumerate(["LEFT", "RIGHT"]):
+            is_present = ar_data["POSITION_DATA"][label] != []
+            is_ghost = ar_data["FRAME_TYPE"][label] == "GHOST"
+            
+            # Color logic
+            color = (255, 50, 50) # Red (Off)
+            if is_present:
+                color = (120, 120, 255) if is_ghost else (0, 255, 150) # Blue for Ghost, Green for Real
+            
+            # Draw status circle
+            circle_y = y + 35 + (i * 30)
+            pygame.draw.circle(surface, color, (x + 30, circle_y), 8)
+            self._draw_text(surface, f"{label} HAND", (x + 50, circle_y - 8), 16, (200, 200, 200))
+    
+    def _draw_compass(self, surface):
+        # Position: Bottom Right
+        center_x, center_y = self.WIN_SIZE[0] - 80, self.WIN_SIZE[1] - 80
+        radius = 40
+        
+        # Get rotation from camera
+        yaw = self.camera.yaw # Assuming your camera has a yaw attribute
+        
+        # Draw background ring
+        pygame.draw.circle(surface, (60, 60, 60, 100), (center_x, center_y), radius, width=2)
+        
+        # Calculate North (N) position
+        # We negate yaw because camera rotation is usually inverted compared to UI space
+        rad = math.radians(yaw)
+        nx = center_x + math.sin(rad) * radius
+        ny = center_y - math.cos(rad) * radius
+        
+        # Draw the "North" needle
+        pygame.draw.line(surface, (255, 50, 50), (center_x, center_y), (nx, ny), 3)
+        self._draw_text(surface, "N", (nx - 5, ny - 20), 14, (255, 50, 50))
+    
+        # Draw a little text for the angle
+        self._draw_text(surface, f"{int(yaw % 360)}°", (center_x - 15, center_y + 45), 14, (200, 200, 200))
+            
+    def _draw_status_panel(self, surface):
+        # Make the panel slightly taller to fit the FPS
+        panel_rect = pygame.Rect(20, 20, 250, 130) 
+        pygame.draw.rect(surface, COLOR_PANEL_BG, panel_rect, border_radius=10)
+        
+        # Get current FPS from pygame clock
+        fps_val = int(self.clock.get_fps())
+        fps_text = f"FPS: {fps_val}"
+        
+        # Choose a color based on performance (Optional but cool)
+        fps_color = (0, 255, 150) if fps_val > 50 else (255, 200, 0)
+        if fps_val < 30: fps_color = (255, 50, 50)
+
+        mode_text = "MODE: " + self.builder.mode
+        cam_text  = "CAM: " + ("RTS" if self.is_rts_mode else "FPS")
+        
+        # Draw the lines
+        self._draw_text(surface, fps_text, (40, 35), 20, fps_color) # FPS back on top!
+        self._draw_text(surface, mode_text, (40, 65), 18, (200, 200, 200))
+        self._draw_text(surface, cam_text, (40, 90), 16, (150, 150, 150))
+
+    def _draw_hotbar(self, surface):
+        bar_w = 500
+        bar_h = 70
+        x = (self.WIN_SIZE[0] - bar_w) // 2
+        y = self.WIN_SIZE[1] - bar_h - 20
+        
+        # Draw Hotbar Background
+        pygame.draw.rect(surface, COLOR_PANEL_BG, (x, y, bar_w, bar_h), border_radius=15)
+        
+        # Draw Voxel Slots
+        slot_size = 50
+        spacing = 15
+        start_x = x + (bar_w - (len(BLOCK_TYPES) * (slot_size + spacing))) // 2
+        
+        for i, block in enumerate(BLOCK_TYPES):
+            slot_x = start_x + i * (slot_size + spacing)
+            slot_y = y + (bar_h - slot_size) // 2
+            
+            # Highlight active slot
+            is_active = (i == self.builder.current_block_index)
+            border_col = COLOR_ACCENT if is_active else (100, 100, 100)
+            border_width = 3 if is_active else 1
+            
+            pygame.draw.rect(surface, (40, 40, 40), (slot_x, slot_y, slot_size, slot_size), border_radius=5)
+            pygame.draw.rect(surface, border_col, (slot_x, slot_y, slot_size, slot_size), width=border_width, border_radius=5)
+            
+            # Draw small block initial or ID
+            self._draw_text(surface, block['name'][0], (slot_x + 18, slot_y + 12), 20, (255, 255, 255))
+
+    def _draw_text(self, surface, text, pos, size, color):
+        font = pygame.font.SysFont("Arial", size, bold=True)
+        txt_surf = font.render(text, True, color)
+        surface.blit(txt_surf, pos)
 
     def render_hands(self, surf):
         """

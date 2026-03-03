@@ -307,30 +307,28 @@ class AR:
             changed = True
         return changed
 
-    def calculate_velocity(self, label, dir=0):
-        """
-        Pixel-space velocity between oldest & newest in histogram.
-        dir=0 returns scalar dist, dir=1 returns [dx,dy] vector
-        Uses the MIDDLE_MCP_IDX point from stored pixel pts.
-        Robust to INVALID_POINT sentinel entries.
-        """
+    def calculate_velocity(self, label, dir=0, window=2):
         hist = self.position_histogram[label]
-        # find entries that have a valid MIDDLE_MCP_IDX
-        valid_entries = []
-        for e in hist:
+        # collect last `window` entries that have valid MIDDLE_MCP_IDX
+        valid_pts = []
+        for e in reversed(hist):
             pts = e.get("pts", [])
             if isinstance(pts, list) and len(pts) > MIDDLE_MCP_IDX:
                 p = pts[MIDDLE_MCP_IDX]
                 if p and p != self.INVALID_POINT:
-                    valid_entries.append(e)
-        if len(valid_entries) >= 2:
-            start = valid_entries[0]["pts"][MIDDLE_MCP_IDX]
-            end   = valid_entries[-1]["pts"][MIDDLE_MCP_IDX]
-            frames = max(1, len(valid_entries) - 1)
-            dx = (end[0] - start[0]) / frames
-            dy = (end[1] - start[1]) / frames
+                    valid_pts.append(p)
+                    if len(valid_pts) >= window:
+                        break
+        if len(valid_pts) >= 2:
+            # newest = valid_pts[0], previous = valid_pts[1]
+            end = valid_pts[0]
+            start = valid_pts[1]
+            dx = end[0] - start[0]
+            dy = end[1] - start[1]
+            # treat as per-frame delta (no division by frames to keep responsiveness)
             return [dx, dy] if dir else math.hypot(dx, dy)
         return [0,0] if dir else 0
+
 
     def generate_frames(self, velocity, label):
         """

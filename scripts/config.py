@@ -67,3 +67,9 @@ BRIGHTSIDE_DEFAULT = True
 LIGHT_DIR = (-0.6, -0.4)        # screen-space light direction (x,y)
 HIGHLIGHT_INTENSITY = 0.28
 SHADOW_INTENSITY = 0.12
+
+
+# HUDS
+
+COLOR_PANEL_BG = (20, 20, 20, 180) # Dark, semi-transparent
+COLOR_ACCENT = (0, 255, 150)       # The "RoX" Cyan/Green
