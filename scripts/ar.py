@@ -237,14 +237,17 @@ class AR:
 
         # diagnostic print for render_hands
         self._log('DEBUG', f"[AR] render_hands {label} pts_count={len(pts)} is_generated={is_generated}")
-
-        # store as dict with source tag (store pixel coords only)
         entry = {
             "pts": pts,
             "source": self.SOURCE_GHOST if is_generated else self.SOURCE_REAL,
-            # TTL only used for ghosts; real entries have None
-            "ttl": self.ghost_ttl_default if is_generated else None
+            "ttl": None,
+            "frame": self.frame_count
         }
+        # If the landmarks object provided a meta ttl (from generate_frames), use it
+        if is_generated and hasattr(landmarks, "_meta_ttl"):
+            entry["ttl"] = int(landmarks._meta_ttl)
+        else:
+            entry["ttl"] = self.ghost_ttl_default if is_generated else None
 
         hist = self.position_histogram[label]
 
@@ -307,60 +310,106 @@ class AR:
             changed = True
         return changed
 
-    def calculate_velocity(self, label, dir=0, window=2):
+    def _angle_between(self, a, b):
+        """Return signed angle from vector a to b (radians). a,b are (x,y)."""
+        return math.atan2(b[1], b[0]) - math.atan2(a[1], a[0])
+
+    def _normalize_angle(self, ang):
+        """Normalize angle to [-pi, pi]."""
+        while ang <= -math.pi:
+            ang += 2 * math.pi
+        while ang > math.pi:
+            ang -= 2 * math.pi
+        return ang
+
+    def calculate_velocity(self, label, dir=0, window=2, max_disp=80, max_ang=0.9):
+        """
+        Returns either scalar speed (dir=0) or [dx,dy, dtheta] per-frame (dir=1).
+        - dx,dy: per-frame wrist translation (pixels/frame)
+        - dtheta: per-frame angular rotation (radians/frame), positive = CCW
+        """
         hist = self.position_histogram[label]
-        # collect last `window` entries that have valid MIDDLE_MCP_IDX
-        valid_pts = []
+        valid = []
+        frames = []
+        # collect last `window` entries with valid wrist and middle_mcp
         for e in reversed(hist):
             pts = e.get("pts", [])
-            if isinstance(pts, list) and len(pts) > MIDDLE_MCP_IDX:
-                p = pts[MIDDLE_MCP_IDX]
-                if p and p != self.INVALID_POINT:
-                    valid_pts.append(p)
-                    if len(valid_pts) >= window:
+            if isinstance(pts, list) and len(pts) > max(WRIST_IDX, MIDDLE_MCP_IDX):
+                w = pts[WRIST_IDX]
+                m = pts[MIDDLE_MCP_IDX]
+                if w and w != self.INVALID_POINT and m and m != self.INVALID_POINT:
+                    valid.append((w, m))
+                    frames.append(int(e.get("frame", self.frame_count)))
+                    if len(valid) >= window:
                         break
-        if len(valid_pts) >= 2:
-            # newest = valid_pts[0], previous = valid_pts[1]
-            end = valid_pts[0]
-            start = valid_pts[1]
-            dx = end[0] - start[0]
-            dy = end[1] - start[1]
-            # treat as per-frame delta (no division by frames to keep responsiveness)
-            return [dx, dy] if dir else math.hypot(dx, dy)
-        return [0,0] if dir else 0
+
+        if len(valid) >= 2:
+            # newest = valid[0], previous = valid[1]
+            (w_new, m_new) = valid[0]
+            (w_old, m_old) = valid[1]
+            f_new = frames[0]; f_old = frames[1]
+            df = max(1, f_new - f_old)
+
+            # linear per-frame translation (wrist)
+            dx = (w_new[0] - w_old[0]) / df
+            dy = (w_new[1] - w_old[1]) / df
+
+            # angular per-frame rotation around wrist using middle mcp vector
+            v_new = (m_new[0] - w_new[0], m_new[1] - w_new[1])
+            v_old = (m_old[0] - w_old[0], m_old[1] - w_old[1])
+            # if either vector is degenerate, fallback to zero rotation
+            if (v_new[0] == 0 and v_new[1] == 0) or (v_old[0] == 0 and v_old[1] == 0):
+                dtheta = 0.0
+            else:
+                raw_ang = self._angle_between(v_old, v_new)
+                raw_ang = self._normalize_angle(raw_ang)
+                dtheta = raw_ang / df  # radians per frame
+
+            # clamp translation and angular velocity
+            mag = math.hypot(dx, dy)
+            if mag > max_disp:
+                scale = max_disp / mag
+                dx *= scale; dy *= scale
+
+            if abs(dtheta) > max_ang:
+                dtheta = math.copysign(max_ang, dtheta)
+
+            self._log('DEBUG', f"[AR] calc_vel {label} dx={dx:.2f} dy={dy:.2f} dtheta={dtheta:.3f}", True)
+            return [dx, dy, dtheta] if dir else math.hypot(dx, dy)
+
+        return [0.0, 0.0, 0.0] if dir else 0.0
 
 
-    def generate_frames(self, velocity, label):
+
+    def generate_frames(self, velocity, label, max_jump=120, lerp_alpha=0.35):
         """
-        Create a ghost HandLandmarks from last pixel positions + vel.
-        Uses the last real entry as the base to avoid ghost-feedback loops.
-        Returns an object with .landmark list where each landmark has .x and .y
-        (keeps the same interface as MediaPipe landmarks for render_hands).
-        Returns None if no valid base exists.
+        Generate ghost landmarks by applying rotation about wrist + translation.
+        velocity: [dx,dy,dtheta] per-frame deltas (pixels/frame, radians/frame).
         """
-        # find last real entry
         hist = self.position_histogram[label]
-        base_pts = None
+        base_entry = None
+        # prefer newest REAL entry
         for e in reversed(hist):
             if e.get("source") == self.SOURCE_REAL and e.get("pts"):
-                # ensure it has at least one non-invalid point
                 if any((p and p != self.INVALID_POINT) for p in e["pts"]):
-                    base_pts = e["pts"]
+                    base_entry = e
                     break
-        if base_pts is None:
-            # fallback to last entry if no real exists and it has valid pts
-            if hist and any((p and p != self.INVALID_POINT) for p in hist[-1].get("pts", [])):
-                base_pts = hist[-1]["pts"]
-            else:
-                # no valid base to generate from
-                self._log('DEBUG', f'NO VALID BASE FOR GHOST GENERATION FOR {label}', True)
-                return None
+        # fallback to last entry only if recent
+        if base_entry is None and hist:
+            last = hist[-1]
+            if (self.frame_count - int(last.get("frame", self.frame_count))) <= 2 and any((p and p != self.INVALID_POINT) for p in last.get("pts", [])):
+                base_entry = last
+
+        if base_entry is None:
+            self._log('DEBUG', f'NO VALID BASE FOR GHOST GENERATION FOR {label}', True)
+            return None
+
+        base_pts = base_entry["pts"]
+        base_frame = int(base_entry.get("frame", self.frame_count))
 
         class LM:
             def __init__(self,x,y):
-                # store as pixel coords (not normalized)
-                self.x = float(x)
-                self.y = float(y)
+                self.x = float(x); self.y = float(y)
         class HL:
             def __init__(self):
                 self.landmark = []
@@ -368,13 +417,69 @@ class AR:
                 self.landmark.append(LM(x,y))
 
         gen = HL()
-        # preserve index positions: if base point is INVALID_POINT, keep it as INVALID_POINT
+
+        dx, dy, dtheta = (0.0, 0.0, 0.0)
+        if isinstance(velocity, (list, tuple)) and len(velocity) >= 3:
+            dx, dy, dtheta = float(velocity[0]), float(velocity[1]), float(velocity[2])
+
+        # compute base wrist if available
+        base_wrist = None
+        if len(base_pts) > WRIST_IDX:
+            w = base_pts[WRIST_IDX]
+            if w and w != self.INVALID_POINT:
+                base_wrist = (float(w[0]), float(w[1]))
+
+        # rotation helper
+        def rotate_point(px, py, cx, cy, ang):
+            # rotate (px,py) around center (cx,cy) by ang radians CCW
+            s = math.sin(ang); c = math.cos(ang)
+            x = px - cx; y = py - cy
+            rx = x * c - y * s
+            ry = x * s + y * c
+            return (rx + cx, ry + cy)
+
+        # apply transform to each base point
         for p in base_pts:
             if not p or p == self.INVALID_POINT:
-                # keep sentinel in generated landmarks as well (use -1,-1)
                 gen.add(float(self.INVALID_POINT[0]), float(self.INVALID_POINT[1]))
+                continue
+            px, py = float(p[0]), float(p[1])
+            if base_wrist is not None:
+                # rotate around wrist by dtheta, then translate by dx,dy
+                rx, ry = rotate_point(px, py, base_wrist[0], base_wrist[1], dtheta)
+                new_x = rx + dx
+                new_y = ry + dy
+
+                # check wrist jump magnitude and lerp if too large
+                proposed_wrist_x, proposed_wrist_y = rotate_point(base_wrist[0], base_wrist[1], base_wrist[0], base_wrist[1], dtheta)
+                proposed_wrist_x += dx; proposed_wrist_y += dy
+                jump = math.hypot(proposed_wrist_x - base_wrist[0], proposed_wrist_y - base_wrist[1])
+                if jump > max_jump:
+                    scale = max_jump / jump
+                    new_x = px + (new_x - px) * scale
+                    new_y = py + (new_y - py) * scale
+
+                # lerp to smooth sudden changes
+                new_x = px * (1.0 - lerp_alpha) + new_x * lerp_alpha
+                new_y = py * (1.0 - lerp_alpha) + new_y * lerp_alpha
             else:
-                gen.add(p[0] + velocity[0], p[1] + velocity[1])
+                # no wrist: fallback to simple translate
+                new_x = px + dx
+                new_y = py + dy
+
+            gen.add(new_x, new_y)
+
+        # adaptive TTL based on angular+linear speed
+        lin_speed = math.hypot(dx, dy)
+        ang_speed = abs(dtheta)
+        # combine heuristics: faster motion -> shorter TTL
+        speed_factor = lin_speed + (ang_speed * 50.0)  # scale angular to pixel-like magnitude
+        adaptive_ttl = int(max(1, min(self.ghost_ttl_default * 3, self.ghost_ttl_default * (1.0 / (0.01 + speed_factor)))))
+
+        gen._meta_ttl = adaptive_ttl
+        gen._meta_base_frame = base_frame
+
+        self._log('DEBUG', f"[AR] GENERATED GHOST {label} lin={lin_speed:.2f} ang={ang_speed:.3f} ttl={adaptive_ttl}", True)
         return gen
 
     def cvimage_to_pygame(self, image):
@@ -511,8 +616,7 @@ class AR:
                         ar_data["CLICK_FLAG"][label] = False
 
                     # only generate ghosts if we have at least one real base and haven't exceeded lifetime
-                    if (len(self.position_histogram[label]) >= 1
-                       and self.hands_tracker[label] < HISTOGRAM_SIZE):
+                    if (len(self.position_histogram[label]) >= 1):
                         vel = self.calculate_velocity(label, dir=1)
                         ghost = self.generate_frames(vel, label)
                         # render ghost frames and mark as generated (only if ghost is valid)
@@ -520,14 +624,13 @@ class AR:
                             self.calculate_hand_points(ghost, label, is_generated=True)
                             self._log('CORE',
                                 f'GENERATED HAND FRAMES FOR {label} HAND_TRACKER={self.hands_tracker[label]}', True)
-                            ar_data["FRAME_TYPE"][label] = "GHOST"
+                        ar_data["FRAME_TYPE"][label] = "GHOST"
                     else:
                         # if we've been absent for a long time, ensure histogram is small
                         if self.hands_tracker[label] >= self.absent_reset_threshold:
                             if len(self.position_histogram[label]) > 0:
                                 self._log('CORE', f'CLEARING HISTOGRAM FOR {label} DUE TO LONG ABSENCE {self.hands_tracker[label]}', True)
                                 self.position_histogram[label].clear()
-
         else:
             self._log('ERROR', 'NO HANDS DETECTED', True)
             for label in ("LEFT","RIGHT"):
@@ -553,12 +656,12 @@ class AR:
                     ar_data["SCALE"][label] = 1
 
                 # if we have recent history and haven't exceeded ghost lifetime, generate ghosts
-                if (len(self.position_histogram[label]) >= 1
-                       and self.hands_tracker[label] < HISTOGRAM_SIZE):
+                if (len(self.position_histogram[label]) >= 1):
                     vel = self.calculate_velocity(label, dir=1)
                     ghost = self.generate_frames(vel, label)
                     if ghost is not None:
                         self.calculate_hand_points(ghost, label, is_generated=True)
+                    ar_data["FRAME_TYPE"][label] = "GHOST"
                 else:
                     # no hands detected at all
                     pass

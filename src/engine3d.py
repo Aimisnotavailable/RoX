@@ -66,7 +66,7 @@ class GraphicsEngine3D:
         self.current_action_label = "" 
         
         # AR System
-        self.cap = cv2.VideoCapture(0)
+        self.cap = cv2.VideoCapture("demo/demo.mp4")
         self.ar = AR(win_size)
         self.input_handler = ARInputHandler(self)
         

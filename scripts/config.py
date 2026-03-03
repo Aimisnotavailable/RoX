@@ -27,7 +27,7 @@ INDEX_TIP_IDX   = 8
 MIDDLE_MCP_IDX  = 9
 WRIST_IDX       = 0
 
-HISTOGRAM_SIZE     = 20
+HISTOGRAM_SIZE     = 10
 PINCH_ON_THRESH    = 0.15    # normalized units 
 PINCH_OFF_THRESH   = 0.20
 PINCH_FRAMES_REQ   = 3       # debounce frames
