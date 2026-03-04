@@ -1,62 +1,104 @@
 # RoX: An Experimental AR Voxel Engine
 
-RoX is a custom-built, experimental Augmented Reality voxel engine. It allows users to build 2D and 3D structures in real-time using nothing but their webcam and hand gestures.
-
-Rather than relying on heavy game engines like Unity or pre-packaged AR frameworks, RoX was built entirely from scratch in Python. It serves as a personal exploration into bridging raw computer vision data with a custom graphics pipeline to solve spatial mapping and real-time interaction challenges.
+RoX is a custom-built **Augmented Reality voxel engine** that turns a standard webcam into a spatial computing sensor. Built entirely from scratch in Python, it bridges the gap between raw computer vision and hardware-accelerated 3D rendering.
 
 ![Python](https://img.shields.io/badge/Python-3.11.1-blue) ![OpenGL](https://img.shields.io/badge/OpenGL-ModernGL-green) ![Computer Vision](https://img.shields.io/badge/Computer_Vision-MediaPipe-orange)
 
-## About The Project
+### The Manifesto: Hardware Democracy
+High-end spatial computing (VR/AR) is currently locked behind expensive, specialized hardware. RoX was born from a simple question: **Can we provide a high-fidelity AR experience to anyone with a basic laptop?**
 
-This project started as a "tiny experiment" to see if a playable AR Minecraft-style interface could be built natively in Python. It evolved into a dual-engine architecture featuring:
-* **3Drox.py**: A 3D voxel world with perspective projection, custom shaders, and depth testing.
-* **2Drox.py**: A specialized 2D engine for top-down grid manipulation and canvas building.
-
-It utilizes **MediaPipe** for skeletal landmark extraction, **OpenCV** for optical flow tracking, and **ModernGL** for hardware-accelerated rendering.
+By prioritizing sophisticated math and kinematic prediction over expensive sensors, RoX aims to democratize spatial interfaces. This isn't just a block-builder; it's a proof-of-concept for accessible, resourceful AR that can be used in schools or by hobbyists who don't have access to costly headsets.
 
 ---
 
-## Installation & Setup
+### Demo: The Ghost Frame System in Action
 
-1.  **Clone the repository:**
-    ```bash
-    git clone [https://github.com/Aimisnotavailable/RoX.git](https://github.com/Aimisnotavailable/RoX.git)
-    cd RoX
-    ```
+To truly understand why RoX is different from standard AR filters, you have to see the **Kinematic Prediction Engine** at work. Raw computer vision often drops tracking during fast movements or occlusions.
 
-2.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
+RoX includes a built-in comparison tool that runs the raw MediaPipe feed side-by-side with the RoX Ghost Frame engine.
 
-3.  **Run the Engine:**
-    * **3D Mode:** `python 3Drox.py`
-    * **2D Mode:** `python 2Drox.py`
+**Run the demo:**
+```bash
+python demo_rox_demo.py
+```
+
+*(This script processes a test video and generates a side-by-side comparison of tracking stability.)*
 
 ---
 
-## Engineering Highlights
-
-### State-Driven Interaction
-Raw webcam data is incredibly jittery. To make placing blocks actually feel good, RoX uses an Exponential Moving Average (EMA) smoothing layer combined with a custom state machine (`HandActionState`). This handles gesture debouncing, pinch stability, and movement deltas, requiring deliberate human intent to trigger actions rather than accidental twitches.
+## Engineering Deep Dive
 
 ### Screen-to-World Raycasting
-To figure out where a user is "pinching" in the 3D world, RoX maps 2D webcam coordinates to 3D space by manually reconstructing the view-projection pipeline. The transformation from Normalized Device Coordinates (NDC) back to World Space is calculated as:
 
-$$ P_{world} = (M_{proj} \cdot M_{view})^{-1} \cdot P_{ndc} $$
+Mapping a 2D mouse or finger coordinate on a webcam feed to a 3D voxel requires reconstructing the entire graphics pipeline in reverse. To find the world-space position \( \mathbf{P}_{\text{world}} \), we transform Normalized Device Coordinates \( \mathbf{P}_{\text{ndc}} \) through the inverse of the View–Projection matrix:
 
-### The "Ghost Frame" Hybrid Tracking System
+\[
+\mathbf{P}_{\text{world},h} = \bigl(\mathbf{M}_{\text{proj}} \cdot \mathbf{M}_{\text{view}}\bigr)^{-1} \cdot \mathbf{P}_{\text{ndc}}
+\]
 
-![AR Ghost Frame Generation](readme_assets/compare_ar_with_without_generation.gif)
+Since this result is in homogeneous coordinates, perform the perspective divide to reach the final 3D world coordinate:
 
-A major challenge in building AR using raw computer vision is frame dropping. Fast hand movements cause motion blur, resulting in the tracking instantly failing. 
+\[
+\mathbf{P}_{\text{world}} = \frac{\mathbf{P}_{\text{world},h}.xyz}{\mathbf{P}_{\text{world},h}.w}
+\]
 
-To prevent the engine from stuttering, RoX implements a custom **Sensor Fusion / Hybrid Tracker**:
-1. **The Anchor (MediaPipe):** Acts as the ground-truth anatomical position.
-2. **The Micro-Tracker (Optical Flow):** When MediaPipe drops out due to blur, OpenCV's Lucas-Kanade optical flow takes over, tracking the exact skin pixels of the joints frame-by-frame.
-3. **Kinematic Prediction Engine:** If the hand leaves the frame entirely, the engine calculates the average linear and angular velocities from the last known good frames:
+### The Ghost Frame Hybrid Tracking
 
-$$\vec{V}_{linear} = \frac{\sum (P_{new} - P_{old})}{\Delta f}$$
-$$V_{angular} = \frac{\sum (\theta_{new} - \theta_{old})}{\Delta f}$$
+Raw computer vision is fragile. Motion blur and occlusion often cause tracking to drop. RoX treats the hand as a physical object with momentum. When tracking is lost, the engine calculates the average velocity over the last \(n\) frames:
 
-The engine then seamlessly injects "Ghost Frames" into the pipeline, advancing the skeletal wireframe along this trajectory. A kinematic friction multiplier decays the momentum gracefully ($$\vec{V}_{t+1} = \vec{V}_t \cdot K_{friction}$$), making the hand glide to a stop instead of flying off into infinity.
+\[
+\vec{V}_{\text{avg}} = \frac{1}{n} \sum_{i=1}^{n} \frac{\vec{P}_i - \vec{P}_{i-1}}{f_i - f_{i-1}}
+\]
+
+The engine then injects *Ghost Frames* that advance the hand's skeletal position along this trajectory. To ensure a natural feel, a kinematic friction coefficient \(K_{\text{friction}}\) is applied to decay the momentum over time:
+
+\[
+\vec{V}_{t+1} = \vec{V}_t \cdot K_{\text{friction}}
+\]
+
+---
+
+## Features & Architecture
+
+- **Dual-Engine Architecture:** Toggle between `3Drox.py` (perspective building) and `2Drox.py` (top-down design).  
+- **State-Driven Interaction:** Uses a robust state machine (`HandActionState`) to handle gesture debouncing and pinch stability.  
+- **ModernGL Pipeline:** Custom GLSL shaders handle real-time lighting and texture-array indexing for varied voxel types.
+
+---
+
+## Installation
+
+1. **Clone the repository**
+```bash
+git clone https://github.com/Aimisnotavailable/RoX.git
+cd RoX
+```
+
+2. **Install dependencies**
+```bash
+pip install -r requirements.txt
+```
+
+3. **Run the engine**
+
+- **3D Mode**
+```bash
+python 3Drox.py
+```
+
+- **2D Mode**
+```bash
+python 2Drox.py
+```
+
+---
+
+## Troubleshooting: Images and Math Rendering
+
+- **Badges / images not rendering:** Ensure your Markdown renderer allows external images. If you are viewing the file locally, some viewers block remote images; try opening the file in GitHub or enable remote images in your viewer.
+- **Math not rendering:** Math blocks use LaTeX. If your renderer does not support MathJax or KaTeX, formulas will appear as plain text. On GitHub, use fenced math with `$$ ... $$` for display math; many static viewers require enabling math rendering or using a plugin.
+- **Local preview tips:** Use a Markdown viewer that supports MathJax/KaTeX (e.g., VS Code with a math extension) or view the file on GitHub to see badges and LaTeX rendered correctly.
+
+---
+
+If you still see visual artifacts or rendering issues after these fixes, check your Markdown viewer settings (remote images enabled, math rendering enabled) and confirm your GPU drivers and ModernGL installation are up to date.
