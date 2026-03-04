@@ -91,8 +91,7 @@ class AR:
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(
             max_num_hands=2,
-            min_detection_confidence=0.2,
-            min_tracking_confidence=0.2
+            min_detection_confidence=0.2
         )
 
         # pixel-space histogram for smoothing & ghost-frames
