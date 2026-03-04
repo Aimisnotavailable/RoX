@@ -1,4 +1,4 @@
-# render_compare_from_video.py
+# demo_rox.py
 """
 Compare AR overlays side-by-side:
 Left  = AR output (as produced in ar.ar_data, includes generated ghost frames)
@@ -15,6 +15,15 @@ import time
 from scripts.ar import AR
 from datetime import datetime
 import math
+import argparse
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="RoX AR Side-by-Side Comparison Renderer")
+    parser.add_argument("--input", type=str, default="demo/demo.mp4", help="Path to input video file")
+    parser.add_argument("--output", type=str, default="demo/compare_ar.gif", help="Path to save the generated GIF")
+    parser.add_argument("--scale", type=float, default=0.6, help="Scale factor for final GIF")
+    parser.add_argument("--fps", type=int, default=15, help="FPS for the output GIF")
+    return parser.parse_args()
 
 # Config
 VIDEO_FILE = "demo/demo.mp4"
@@ -98,6 +107,15 @@ def surf_to_frame(surf, scale=1.0):
 # Main -----------------------------------------------------------------------
 
 def main():
+
+    args = parse_args()
+    
+    # Use args instead of hardcoded config
+    VIDEO_FILE = args.input
+    OUT_GIF = args.output
+    SCALE = args.scale
+    FPS = args.fps
+
     pygame.init(); pygame.font.init()
     screen = pygame.display.set_mode((WIDTH * 2 + BORDER * 3, HEIGHT + BORDER * 3))
     clock = pygame.time.Clock()

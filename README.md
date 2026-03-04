@@ -19,7 +19,7 @@ RoX includes a built-in comparison tool that runs the raw MediaPipe feed side-by
 
 **Run the demo:**
 ```bash
-python demo_rox_demo.py
+python demo_rox.py --input path/to/video.mp4 --output results/comparison.gif --fps 20
 ```
 
 *(This script processes a test video and generates a side-by-side comparison of tracking stability.)*
