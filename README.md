@@ -59,4 +59,4 @@ To prevent the engine from stuttering, RoX implements a custom **Sensor Fusion /
 $$\vec{V}_{linear} = \frac{\sum (P_{new} - P_{old})}{\Delta f}$$
 $$V_{angular} = \frac{\sum (\theta_{new} - \theta_{old})}{\Delta f}$$
 
-The engine then seamlessly injects "Ghost Frames" into the pipeline, advancing the skeletal wireframe along this trajectory. A kinematic friction multiplier decays the momentum gracefully ($\vec{V}_{t+1} = \vec{V}_t \cdot K_{friction}$), making the hand glide to a stop instead of flying off into infinity.
+The engine then seamlessly injects "Ghost Frames" into the pipeline, advancing the skeletal wireframe along this trajectory. A kinematic friction multiplier decays the momentum gracefully ($$\vec{V}_{t+1} = \vec{V}_t \cdot K_{friction}$$), making the hand glide to a stop instead of flying off into infinity.
