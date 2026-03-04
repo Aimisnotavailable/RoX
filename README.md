@@ -53,6 +53,8 @@ $$
 
 ### The Ghost Frame Hybrid Tracking
 
+![AR Ghost Frame Generation](readme_assets/compare_ar_with_without_generation.gif)
+
 The average velocity over the last $n$ frames:
 
 $$
