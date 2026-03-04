@@ -110,10 +110,11 @@ class AR:
         self.pinch_absent_reset = max(3, HISTOGRAM_SIZE // 2)
         
         # --- GHOST KINEMATICS & TTL ---
-        self.ghost_ttl_counter = {'LEFT': 0, 'RIGHT': 0}
-        self.MAX_GHOST_TTL = 6  # How many frames a ghost lives independently
+        # Ghost tracking and Kinematics
         self.ghost_velocity = {'LEFT': [0.0, 0.0, 0.0], 'RIGHT': [0.0, 0.0, 0.0]}
-        self.KINEMATIC_FRICTION = 0.75  # Retains 75% of velocity each frame (deceleration)
+        self.KINEMATIC_FRICTION = 0.85 
+        self.MAX_GHOST_TTL = 10 # Maximum frames a ghost is allowed to exist
+        self.ghost_ttl_counter = {'LEFT': 0, 'RIGHT': 0}
 
         self.ghost_age_default = 2
         self.detector = PinchDetector()
@@ -138,20 +139,21 @@ class AR:
     def _is_normalized(self, x, y):
         return 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0
 
-    def _sanitize_point(self, x_px, y_px, W, H, allow_negative_out_of_bounds=True):
-        if not math.isfinite(x_px) or not math.isfinite(y_px):
-            return None
+    # def _sanitize_point(self, x_px, y_px, W, H, allow_negative_out_of_bounds=True):
+    #     # if not math.isfinite(x_px) or not math.isfinite(y_px):
+    #     #     return None
 
-        x_i = int(round(x_px))
-        y_i = int(round(y_px))
-        if allow_negative_out_of_bounds:
-            if x_i < 0 or x_i >= W or y_i < 0 or y_i >= H:
-                return self.INVALID_POINT
-            return (x_i, y_i)
-        else:
-            x_i = max(-1, min(W - 1, x_i))
-            y_i = max(-1, min(H - 1, y_i))
-            return (x_i, y_i)
+    #     # x_i = int(round(x_px))
+    #     # y_i = int(round(y_px))
+    #     # if allow_negative_out_of_bounds:
+    #     #     if x_i < 0 or x_i >= W or y_i < 0 or y_i >= H:
+    #     #         return self.INVALID_POINT
+    #     #     return (x_i, y_i)
+    #     # else:
+    #     #     x_i = max(-1, min(W - 1, x_i))
+    #     #     y_i = max(-1, min(H - 1, y_i))
+    #     #     return (x_i, y_i)
+    #     return (x_px, y_px)
 
     def _valid_landmark(self, lm):
         try:
@@ -163,46 +165,38 @@ class AR:
         return True
 
     def calculate_hand_points(self, landmarks, label, is_generated=False):
+        """
+        Draws landmarks directly to pixel space. Allows out-of-bounds negative 
+        coordinates naturally to prevent skeleton snapping/stretching.
+        """
         pts = []
         raw_landmarks = list(landmarks.landmark)
 
-        valid_flags = [self._valid_landmark(lm) for lm in raw_landmarks]
-        valid_count = sum(1 for v in valid_flags if v)
-
-        if valid_count == 0 and len(raw_landmarks) > 0:
-            self._log('DEBUG', f"[AR] WARNING: no landmarks passed _valid_landmark for {label}; accepting all to avoid drop", True)
-            valid_flags = [True] * len(raw_landmarks)
-            valid_count = len(raw_landmarks)
-
-        for idx, lm in enumerate(raw_landmarks):
-            if not valid_flags[idx]:
-                pts.append(self.INVALID_POINT)
-                continue
+        for lm in raw_landmarks:
             try:
                 lx = float(lm.x)
                 ly = float(lm.y)
             except Exception:
-                pts.append(self.INVALID_POINT)
+                pts.append((0.0, 0.0))
                 continue
 
-            if self._is_normalized(lx, ly):
+            if not is_generated:
+                # Real MediaPipe landmarks are always proportions of the screen
                 x_px = lx * self.W
                 y_px = ly * self.H
             else:
+                # Generated ghosts are already in exact pixel space
                 x_px = lx
                 y_px = ly
 
-            sanitized = self._sanitize_point(x_px, y_px, self.W, self.H, allow_negative_out_of_bounds=True)
-            if sanitized is None:
-                pts.append(self.INVALID_POINT)
-                continue
-            pts.append(sanitized)
+            pts.append((x_px, y_px))
 
         entry = {
             "pts": pts,
             "source": self.SOURCE_GHOST if is_generated else self.SOURCE_REAL,
             "frame": self.frame_count
         }
+        
         if is_generated:
             gen_frame = getattr(landmarks, "_meta_gen_frame", None)
             entry["gen_frame"] = gen_frame if gen_frame is not None else self.frame_count
@@ -211,12 +205,11 @@ class AR:
 
         if not is_generated:
             if self.hands_tracker[label] >= self.absent_reset_threshold:
-                self._log('CORE', f'RESETTING HISTOGRAM FOR {label} AFTER LONG ABSENCE {self.hands_tracker[label]}', True)
                 hist.clear()
                 hist.append(entry)
             else:
                 while len(hist) > 0 and hist[-1].get("source") == self.SOURCE_GHOST:
-                    popped = hist.pop()
+                    hist.pop()
                 if len(pts) >= 1:
                     if len(hist) < HISTOGRAM_SIZE:
                         hist.append(entry)
@@ -271,15 +264,19 @@ class AR:
     # -------------------------
     # Improved velocity estimator
     # -------------------------
-    def calculate_velocity(self, label, dir=0, window=3, blend=0.8):
+    def calculate_velocity(self, label, dir=0, window=4):
         """
-        Improved velocity estimator using Polar Kinematics (Speed + Heading) 
-        to account for path curvature and apply kinetic drag to prevent slingshotting.
+        Stabilized velocity estimator.
+        Averages recent real frames and clamps angular velocity to prevent violent flips.
         """
         hist = self.position_histogram[label]
+        
+        # 1. Collect ONLY REAL valid frames
         valid = []
         frames = []
         for e in reversed(hist):
+            if e.get("source") != self.SOURCE_REAL:
+                continue
             pts = e.get("pts", [])
             if isinstance(pts, list) and len(pts) > max(WRIST_IDX, MIDDLE_MCP_IDX):
                 w = pts[WRIST_IDX]
@@ -293,13 +290,15 @@ class AR:
         if len(valid) < 2:
             return [0.0, 0.0, 0.0] if dir else 0.0
 
-        lin_vels = []   
-        ang_vels = []   
+        lin_vels = []
+        ang_vels = []
 
+        # 2. Compute interval velocities
         for i in range(len(valid) - 1):
             (w_new, m_new) = valid[i]
             (w_old, m_old) = valid[i + 1]
-            df = max(1, frames[i] - frames[i + 1])  
+            f_new = frames[i]; f_old = frames[i + 1]
+            df = max(1, f_new - f_old)
 
             vx = (w_new[0] - w_old[0]) / df
             vy = (w_new[1] - w_old[1]) / df
@@ -310,69 +309,32 @@ class AR:
                 dtheta = 0.0
             else:
                 raw_ang = self._angle_between(v_old, v_new)
-                dtheta = self._normalize_angle(raw_ang) / df
+                raw_ang = self._normalize_angle(raw_ang)
+                dtheta = raw_ang / df
 
             lin_vels.append((vx, vy))
             ang_vels.append(dtheta)
 
-        if len(lin_vels) == 1:
-            if dir:
-                return [lin_vels[0][0], lin_vels[0][1], ang_vels[0]]
-            return math.hypot(*lin_vels[0])
+        # 3. Average them out to smooth over MediaPipe jitter
+        avg_vx = sum(v[0] for v in lin_vels) / len(lin_vels)
+        avg_vy = sum(v[1] for v in lin_vels) / len(lin_vels)
+        avg_dtheta = sum(ang_vels) / len(ang_vels)
 
-        lin_vels_chrono = list(reversed(lin_vels))
-        ang_vels_chrono = list(reversed(ang_vels))
-
-        last_vx, last_vy = lin_vels_chrono[-1]
-        last_dtheta = ang_vels_chrono[-1]
-        prev_vx, prev_vy = lin_vels_chrono[-2]
-        prev_dtheta = ang_vels_chrono[-2]
-
-        # 1. Local Hand Rotation (Wrist pivot)
-        adtheta = last_dtheta - prev_dtheta
-        pred_dtheta = last_dtheta + (adtheta * blend)
-
-        # 2. Path Curvature & Speed (Macroscopic arc tracking)
-        last_speed = math.hypot(last_vx, last_vy)
-        prev_speed = math.hypot(prev_vx, prev_vy)
-
-        # Only compute curvature if the hand is moving fast enough (prevents erratic division by noise)
-        if prev_speed > 2.0 and last_speed > 2.0:
-            last_heading = math.atan2(last_vy, last_vx)
-            prev_heading = math.atan2(prev_vy, prev_vx)
-            
-            # The angular velocity of the path itself
-            path_curvature = self._normalize_angle(last_heading - prev_heading)
-            accel_speed = last_speed - prev_speed
-            
-            # Predict the next speed, clamping at 0 to prevent reversing
-            pred_speed = max(0.0, last_speed + (accel_speed * blend))
-            
-            # Curve the heading
-            pred_heading = last_heading + (path_curvature * blend)
-            
-            # Convert back to cartesian components for generate_frames
-            pred_vx = pred_speed * math.cos(pred_heading)
-            pred_vy = pred_speed * math.sin(pred_heading)
-        else:
-            # Cartesian fallback for slow/micro movements
-            ax = last_vx - prev_vx
-            ay = last_vy - prev_vy
-            pred_vx = last_vx + (ax * blend)
-            pred_vy = last_vy + (ay * blend)
-
-        # 3. Apply Kinetic Drag (Friction)
-        # 15% velocity loss per frame. Stops ghosts from orbiting infinitely into space.
-        DRAG = 0.85 
-        pred_vx *= DRAG
-        pred_vy *= DRAG
-        pred_dtheta *= DRAG
-
-        self._log('DEBUG', f"[AR] predict_vel polar {label} spd={last_speed:.1f}->{math.hypot(pred_vx, pred_vy):.1f}", True)
+        # 4. ANTI-FLIP CLAMPING
+        # Max rotation of ~5 degrees (0.08 rad) per frame to prevent wild spinning
+        avg_dtheta = max(-0.08, min(0.08, avg_dtheta))
+        
+        # Max linear speed clamp (prevents shooting off-screen from extreme jitter)
+        MAX_SPEED = max(self.W, self.H) * 0.1
+        speed = math.hypot(avg_vx, avg_vy)
+        if speed > MAX_SPEED:
+            scale = MAX_SPEED / speed
+            avg_vx *= scale
+            avg_vy *= scale
 
         if dir:
-            return [pred_vx, pred_vy, pred_dtheta]
-        return math.hypot(pred_vx, pred_vy)
+            return [avg_vx, avg_vy, avg_dtheta]
+        return math.hypot(avg_vx, avg_vy)
     # -------------------------
     # Handedness reconciliation
     # -------------------------
@@ -383,7 +345,7 @@ class AR:
                 pts = e.get("pts", [])
                 if isinstance(pts, list) and len(pts) > WRIST_IDX:
                     w = pts[WRIST_IDX]
-                    if w and w != self.INVALID_POINT:
+                    if w:
                         return (float(w[0]), float(w[1]))
         return None
 
@@ -508,66 +470,90 @@ class AR:
                 # Update the detection tuple in place. History is protected!
                 detections[i] = (new_label, wrist_px, lm_set)
 
+    # -------------------------
+    # Fixed generate_frames
+    # -------------------------
     def generate_frames(self, velocity, label):
+        """
+        Generate ghost landmarks by applying rotation about wrist + translation.
+        Enforces Rigid Body Kinematics so the hand does not deform or squash.
+        """
         hist = self.position_histogram[label]
-        base_pts = hist[-1].get("pts", []) if len(hist) > 0 else []
+        
+        if len(hist) > 0 :
+            base_pts = hist[-1].get("pts", []) or []
+        else:
+            base_pts = []
 
         class LM:
-            def __init__(self, x, y):
+            def __init__(self,x,y):
                 self.x = float(x); self.y = float(y)
         class HL:
             def __init__(self):
                 self.landmark = []
-            def add(self, x, y):
-                self.landmark.append(LM(x, y))
+            def add(self,x,y):
+                self.landmark.append(LM(x,y))
 
         gen = HL()
+
         dx, dy, dtheta = (0.0, 0.0, 0.0)
         if isinstance(velocity, (list, tuple)) and len(velocity) >= 3:
             dx, dy, dtheta = float(velocity[0]), float(velocity[1]), float(velocity[2])
 
-        # Dampen rotation heavily to prevent the hand from spinning like a propeller
-        dtheta = max(-0.08, min(0.08, dtheta))
+        # 1. Clamp Angular Velocity (prevent "helicopter" spinning)
+        MAX_DTHETA = 0.35 # ~20 degrees max rotation per frame
+        dtheta = max(-MAX_DTHETA, min(MAX_DTHETA, dtheta))
 
+        # 2. Clamp Translation globally (prevents the skeleton from deforming)
+        max_jump = max(self.W, self.H) * 0.15 # 15% of screen max per frame
+        speed = math.hypot(dx, dy)
+        if speed > max_jump:
+            scale = max_jump / speed
+            dx *= scale
+            dy *= scale
+
+        # compute base wrist if available
         base_wrist = None
         if isinstance(base_pts, list) and len(base_pts) > WRIST_IDX:
             w = base_pts[WRIST_IDX]
             if w and w != self.INVALID_POINT:
                 base_wrist = (float(w[0]), float(w[1]))
 
+        # rotation helper
+        def rotate_point(px, py, cx, cy, ang):
+            # rotate (px,py) around center (cx,cy) by ang radians CCW
+            s = math.sin(ang); c = math.cos(ang)
+            x = px - cx; y = py - cy
+            rx = x * c - y * s
+            ry = x * s + y * c
+            return (rx + cx, ry + cy)
+        
         for p in base_pts:
-            if not p or p == self.INVALID_POINT:
-                gen.add(float(self.INVALID_POINT[0]), float(self.INVALID_POINT[1]))
-                continue
-            
             px, py = float(p[0]), float(p[1])
             
             if base_wrist is not None:
-                # 1. Translate point to origin relative to wrist
-                tx = px - base_wrist[0]
-                ty = py - base_wrist[1]
-                
-                # 2. Rotate point around the wrist
-                c = math.cos(dtheta)
-                s = math.sin(dtheta)
-                rx = tx * c - ty * s
-                ry = tx * s + ty * c
-                
-                # 3. Translate back, then apply linear movement
-                new_x = rx + base_wrist[0] + dx
-                new_y = ry + base_wrist[1] + dy
+                rx, ry = rotate_point(px, py, base_wrist[0], base_wrist[1], dtheta)
+                new_x = rx + dx
+                new_y = ry + dy
             else:
                 new_x = px + dx
                 new_y = py + dy
 
-            if not (math.isfinite(new_x) and math.isfinite(new_y)):
-                gen.add(float(self.INVALID_POINT[0]), float(self.INVALID_POINT[1]))
-            else:
-                gen.add(new_x, new_y)
+            # Just append directly. Allow off-screen negatives!
+            gen.add(new_x, new_y)
 
+        # adaptive age suggestion 
+        lin_speed = math.hypot(dx, dy)
+        ang_speed = abs(dtheta)
+        speed_factor = lin_speed + (ang_speed * 50.0)
+        
+        min_age = 1
+        max_age = max(1, int(self.ghost_age_default))
+        adaptive_age = int(max(min_age, min(max_age, self.ghost_age_default // (1 + int(speed_factor)))))
         gen._meta_gen_frame = self.frame_count
-        gen._meta_age = self.ghost_age_default
+        gen._meta_age = adaptive_age
 
+        self._log('DEBUG', f"[AR] GENERATED GHOST {label} lin={lin_speed:.2f} ang={ang_speed:.3f} age={adaptive_age}", True)
         return gen
 
     def _prune_ghosts_on_real(self, label):
@@ -623,9 +609,11 @@ class AR:
 
         seen = []
 
+        # 1. Prune old ghosts purely by age
         for label in ("LEFT", "RIGHT"):
             self._prune_ghosts_by_age(label)
 
+        # 2. Extract RAW detections
         detections = []
         if getattr(res, 'multi_hand_landmarks', None):
             for lm_set, handedness in zip(res.multi_hand_landmarks, res.multi_handedness):
@@ -639,17 +627,21 @@ class AR:
                         wrist_px = (lx, ly)
                 except Exception:
                     wrist_px = None
+                
                 detections.append((label, wrist_px, lm_set))
 
+            # 3. Reconcile Handedness (Zero-Trust Policy)
             if len(detections) > 0:
                 self._reconcile_handedness(detections)
 
+            # 4. Process valid, reconciled hands
             for i, (label, wrist_px, lm_set) in enumerate(detections):
                 seen.append(label)
 
                 landmarks_norm = [(lm.x, lm.y) for lm in lm_set.landmark]
                 d = self.detector.update(label, landmarks_norm)
 
+                # Prevent clicks if the hand is flickering
                 if self.presence_counter[label] < self.presence_threshold_on:
                     d["is_pinched"] = False
 
@@ -669,7 +661,7 @@ class AR:
 
                 self.hands_tracker[label] = 0
 
-        # Unified logic for missing hands (either partially missing or fully missing)
+        # 5. UNIFIED missing hand logic (handles both 1 missing hand or no hands detected)
         for label in ("LEFT", "RIGHT"):
             if label not in seen:
                 self.hands_tracker[label] += 1
@@ -677,17 +669,22 @@ class AR:
 
                 ghost_pts = []
                 
-                # 1. Capture velocity exactly on the frame it gets lost
+                # A. Capture velocity exactly on the frame it gets lost
                 if self.hands_tracker[label] == 1:
-                    if len(self.position_histogram[label]) >= 1:
+                    real_hist = [e for e in self.position_histogram[label] if e.get("source") == self.SOURCE_REAL]
+                    
+                    # ANTI-PHANTOM CHECK: 
+                    # Only spawn ghosts if this hand was solid reality for at least 3 frames.
+                    if len(real_hist) >= 3:
                         self.ghost_velocity[label] = self.calculate_velocity(label, dir=1)
+                        self.ghost_ttl_counter[label] = self.MAX_GHOST_TTL
                     else:
                         self.ghost_velocity[label] = [0.0, 0.0, 0.0]
-                    self.ghost_ttl_counter[label] = self.MAX_GHOST_TTL
+                        self.ghost_ttl_counter[label] = 0
                     
-                # 2. Generate ghosts using Kinematic Friction & TTL
+                # B. Generate ghosts using Kinematic Friction & TTL
                 if self.ghost_ttl_counter[label] > 0 and self.hands_tracker[label] < self.absent_reset_threshold:
-                    # Apply friction deceleration
+                    # Apply friction deceleration (graceful braking)
                     self.ghost_velocity[label][0] *= self.KINEMATIC_FRICTION
                     self.ghost_velocity[label][1] *= self.KINEMATIC_FRICTION
                     self.ghost_velocity[label][2] *= self.KINEMATIC_FRICTION
@@ -702,7 +699,7 @@ class AR:
                     # Ensure velocity is zeroed out if TTL expires or hand is long absent
                     self.ghost_velocity[label] = [0.0, 0.0, 0.0]
                 
-                # Final state sync 
+                # C. Final state sync 
                 if ghost_pts and len(ghost_pts) > 0:
                     ar_data["FRAME_TYPE"][label] = "GHOST"
                     ar_data["POSITION_DATA"][label] = ghost_pts
@@ -714,14 +711,17 @@ class AR:
                 ar_data["CLICK_DIST"][label] = 0
                 ar_data["SCALE"][label] = 1
 
+                # D. Deep cleanup for hands gone too long
                 if self.hands_tracker[label] >= self.absent_reset_threshold:
                     if len(self.position_histogram[label]) > 0:
+                        self._log('CORE', f'CLEARING HISTOGRAM FOR {label} DUE TO LONG ABSENCE', True)
                         self.position_histogram[label].clear()
                     try:
                         self.detector.reset(label)
                     except Exception:
                         pass
 
+        # 6. Global Hand Presence Check
         ar_data["HAND_PRESENCE"] = any(self.presence_counter[label] >= self.presence_threshold_on for label in ("LEFT","RIGHT"))
 
         self.ar_data = ar_data
