@@ -66,7 +66,7 @@ class GraphicsEngine3D:
         self.current_action_label = "" 
         
         # AR System
-        self.cap = cv2.VideoCapture("demo/demo.mp4")
+        self.cap = cv2.VideoCapture(0)
         self.ar = AR(win_size)
         self.input_handler = ARInputHandler(self)
         
@@ -246,15 +246,64 @@ class GraphicsEngine3D:
 
         self._draw_status_panel(self.ui_surface) # Existing
         self._draw_hotbar(self.ui_surface)       # Existing
-        
+
+        self._draw_action_indicator(self.ui_surface)
         # --- The "AR Stuff" ---
         self._draw_ar_status(self.ui_surface)    # NEW: Hand tracking info
         self._draw_compass(self.ui_surface)      # NEW: Orientation info
 
+        
         # Upload and render to OpenGL
         texture_data = pygame.image.tostring(self.ui_surface, "RGBA", True)
         self.ui_texture.write(texture_data)
 
+    def _draw_action_indicator(self, ui_surface):
+        """
+        Draws a modern, sleek pill-shaped indicator at the top center 
+        of the screen showing the current gesture/action state.
+        """
+        current_action = "READY"
+        bg_color = (80, 80, 80) # Default Dim Gray
+        
+        # Check AR Input States
+        left_pinched = self.ar.ar_data.get("CLICK_FLAG", {}).get("LEFT", False)
+        right_pinched = self.ar.ar_data.get("CLICK_FLAG", {}).get("RIGHT", False)
+        
+        # Determine Current Action based on pinches
+        if left_pinched and right_pinched:
+            current_action = "ZOOMING"
+            bg_color = COLOR_ZOOM      # Amber
+        elif left_pinched:
+            current_action = "ROTATING"
+            bg_color = COLOR_ROTATE    # Cyan
+        elif right_pinched or self.clicking: 
+            current_action = "BUILDING"
+            bg_color = COLOR_BUILD     # Green
+                
+        # Setup Font & Text
+        font = pygame.font.SysFont('Arial', 18, bold=True)
+        text_surf = font.render(current_action, True, (20, 20, 20)) # Dark text for contrast
+        text_rect = text_surf.get_rect()
+        
+        # Size and Position the "Pill" background
+        pad_x, pad_y = 20, 8
+        center_x = self.WIN_SIZE[0] // 2
+        top_y = 20 # 20 pixels from the top of the screen
+        
+        bg_rect = pygame.Rect(0, 0, text_rect.width + pad_x * 2, text_rect.height + pad_y * 2)
+        bg_rect.centerx = center_x
+        bg_rect.top = top_y
+        
+        # Draw to the ui_surface
+        # Draw colored background with curved corners (border_radius)
+        pygame.draw.rect(ui_surface, bg_color, bg_rect, border_radius=15)
+        # Draw a clean white outline
+        pygame.draw.rect(ui_surface, (255, 255, 255), bg_rect, width=2, border_radius=15)
+        
+        # Center the text inside the pill and blit it
+        text_rect.center = bg_rect.center
+        ui_surface.blit(text_surf, text_rect)
+        
     def _draw_ar_status(self, surface):
         # Position: Top Right
         x, y = self.WIN_SIZE[0] - 270, 20

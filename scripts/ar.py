@@ -3,6 +3,7 @@ from scripts.config import *
 import math
 import cv2
 import pygame
+import numpy as np # Added for Optical Flow
 import mediapipe as mp
 from collections import deque, namedtuple
 
@@ -11,7 +12,6 @@ HandState = namedtuple("HandState", ["pos_hist", "pinch_count", "is_pinched"])
 
 class PinchDetector:
     def __init__(self):
-        # one state per hand label
         self.hands = {
             "LEFT":  HandState(deque(maxlen=HISTOGRAM_SIZE), 0, False),
             "RIGHT": HandState(deque(maxlen=HISTOGRAM_SIZE), 0, False),
@@ -24,10 +24,6 @@ class PinchDetector:
         return math.hypot(dx, dy)
 
     def update(self, label, landmarks_norm):
-        """
-        landmarks_norm: list of (x,y) in [0..1]
-        Returns dict: { scale, rel_dist, raw_dist, is_pinched }
-        """
         state = self.hands[label]
         state.pos_hist.append(landmarks_norm)
 
@@ -42,7 +38,6 @@ class PinchDetector:
 
         pc, pinched = state.pinch_count, state.is_pinched
 
-        # hysteresis + debounce
         if pinched:
             if rel_dist > PINCH_OFF_THRESH:
                 pc -= 1
@@ -57,7 +52,6 @@ class PinchDetector:
         elif pinched and pc <= -PINCH_FRAMES_REQ:
             pinched = False
 
-        # save state
         self.hands[label] = HandState(state.pos_hist, pc, pinched)
 
         return {
@@ -68,10 +62,6 @@ class PinchDetector:
         }
 
     def reset(self, label):
-        """
-        Reset the pinch state for a given hand label.
-        Clears pinch_count and is_pinched but preserves the position history deque.
-        """
         if label in self.hands:
             state = self.hands[label]
             self.hands[label] = HandState(state.pos_hist, 0, False)
@@ -81,8 +71,6 @@ class PinchDetector:
 class AR:
     SOURCE_REAL = "real"
     SOURCE_GHOST = "ghost"
-    # sentinel for invalid / out-of-bounds points
-    INVALID_POINT = (-1, -1)
 
     def __init__(self, screen_dim=(1280, 720)):
         self.W = screen_dim[0]
@@ -94,28 +82,31 @@ class AR:
             min_detection_confidence=0.2
         )
 
-        # pixel-space histogram for smoothing & ghost-frames
         self.position_histogram = {'LEFT': [], 'RIGHT': []}
-        # how many frames since last real detection for each hand
         self.hands_tracker     = {'LEFT': 0,      'RIGHT': 0     }
-
-        # presence hysteresis counters (avoid flicker when detection briefly fails)
         self.presence_counter = {'LEFT': 0, 'RIGHT': 0}
         self.presence_threshold_on = 2   
         self.presence_threshold_off = -2 
-
-        # how many consecutive frames a hand must be absent before we consider it "long absent"
         self.absent_reset_threshold = HISTOGRAM_SIZE * 2
         self.pinch_absent_reset = max(3, HISTOGRAM_SIZE // 2)
         
         # --- GHOST KINEMATICS & TTL ---
-        # Ghost tracking and Kinematics
         self.ghost_velocity = {'LEFT': [0.0, 0.0, 0.0], 'RIGHT': [0.0, 0.0, 0.0]}
         self.KINEMATIC_FRICTION = 0.85 
-        self.MAX_GHOST_TTL = 10 # Maximum frames a ghost is allowed to exist
+        self.MAX_GHOST_TTL = 10 
         self.ghost_ttl_counter = {'LEFT': 0, 'RIGHT': 0}
-
         self.ghost_age_default = 2
+        
+        # --- OPTICAL FLOW HYBRID TRACKER ---
+        self.prev_gray = None
+        self.lk_params = dict(
+            winSize=(25, 25), 
+            maxLevel=3,
+            criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03)
+        )
+        # Holds the exact pixel coordinates of the Wrist and Middle MCP for Optical Flow
+        self.lk_tracked_points = {'LEFT': None, 'RIGHT': None}
+
         self.detector = PinchDetector()
         self.frame_count = 0
 
@@ -135,25 +126,6 @@ class AR:
             return
         get_logger_info(level, msg)
 
-    def _is_normalized(self, x, y):
-        return 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0
-
-    # def _sanitize_point(self, x_px, y_px, W, H, allow_negative_out_of_bounds=True):
-    #     # if not math.isfinite(x_px) or not math.isfinite(y_px):
-    #     #     return None
-
-    #     # x_i = int(round(x_px))
-    #     # y_i = int(round(y_px))
-    #     # if allow_negative_out_of_bounds:
-    #     #     if x_i < 0 or x_i >= W or y_i < 0 or y_i >= H:
-    #     #         return self.INVALID_POINT
-    #     #     return (x_i, y_i)
-    #     # else:
-    #     #     x_i = max(-1, min(W - 1, x_i))
-    #     #     y_i = max(-1, min(H - 1, y_i))
-    #     #     return (x_i, y_i)
-    #     return (x_px, y_px)
-
     def _valid_landmark(self, lm):
         try:
             x = float(lm.x); y = float(lm.y)
@@ -164,10 +136,6 @@ class AR:
         return True
 
     def calculate_hand_points(self, landmarks, label, is_generated=False):
-        """
-        Draws landmarks directly to pixel space. Allows out-of-bounds negative 
-        coordinates naturally to prevent skeleton snapping/stretching.
-        """
         pts = []
         raw_landmarks = list(landmarks.landmark)
 
@@ -180,11 +148,9 @@ class AR:
                 continue
 
             if not is_generated:
-                # Real MediaPipe landmarks are always proportions of the screen
                 x_px = lx * self.W
                 y_px = ly * self.H
             else:
-                # Generated ghosts are already in exact pixel space
                 x_px = lx
                 y_px = ly
 
@@ -260,17 +226,8 @@ class AR:
             ang -= 2 * math.pi
         return ang
 
-    # -------------------------
-    # Improved velocity estimator
-    # -------------------------
     def calculate_velocity(self, label, dir=0, window=4):
-        """
-        Stabilized velocity estimator.
-        Averages recent real frames and clamps angular velocity to prevent violent flips.
-        """
         hist = self.position_histogram[label]
-        
-        # 1. Collect ONLY REAL valid frames
         valid = []
         frames = []
         for e in reversed(hist):
@@ -280,7 +237,7 @@ class AR:
             if isinstance(pts, list) and len(pts) > max(WRIST_IDX, MIDDLE_MCP_IDX):
                 w = pts[WRIST_IDX]
                 m = pts[MIDDLE_MCP_IDX]
-                if w and w != self.INVALID_POINT and m and m != self.INVALID_POINT:
+                if w and m:
                     valid.append((w, m))
                     frames.append(int(e.get("frame", self.frame_count)))
                     if len(valid) >= window:
@@ -292,7 +249,6 @@ class AR:
         lin_vels = []
         ang_vels = []
 
-        # 2. Compute interval velocities
         for i in range(len(valid) - 1):
             (w_new, m_new) = valid[i]
             (w_old, m_old) = valid[i + 1]
@@ -314,16 +270,12 @@ class AR:
             lin_vels.append((vx, vy))
             ang_vels.append(dtheta)
 
-        # 3. Average them out to smooth over MediaPipe jitter
         avg_vx = sum(v[0] for v in lin_vels) / len(lin_vels)
         avg_vy = sum(v[1] for v in lin_vels) / len(lin_vels)
         avg_dtheta = sum(ang_vels) / len(ang_vels)
 
-        # 4. ANTI-FLIP CLAMPING
-        # Max rotation of ~5 degrees (0.08 rad) per frame to prevent wild spinning
         avg_dtheta = max(-0.08, min(0.08, avg_dtheta))
         
-        # Max linear speed clamp (prevents shooting off-screen from extreme jitter)
         MAX_SPEED = max(self.W, self.H) * 0.1
         speed = math.hypot(avg_vx, avg_vy)
         if speed > MAX_SPEED:
@@ -334,9 +286,7 @@ class AR:
         if dir:
             return [avg_vx, avg_vy, avg_dtheta]
         return math.hypot(avg_vx, avg_vy)
-    # -------------------------
-    # Handedness reconciliation
-    # -------------------------
+
     def _last_real_wrist(self, label):
         hist = self.position_histogram.get(label, [])
         for e in reversed(hist):
@@ -365,11 +315,13 @@ class AR:
         self.presence_counter[a_label], self.presence_counter[b_label] = \
             self.presence_counter[b_label], self.presence_counter[a_label]
         
-        # Swap TTL and Velocities
         self.ghost_ttl_counter[a_label], self.ghost_ttl_counter[b_label] = \
             self.ghost_ttl_counter[b_label], self.ghost_ttl_counter[a_label]
         self.ghost_velocity[a_label], self.ghost_velocity[b_label] = \
             self.ghost_velocity[b_label], self.ghost_velocity[a_label]
+            
+        self.lk_tracked_points[a_label], self.lk_tracked_points[b_label] = \
+            self.lk_tracked_points[b_label], self.lk_tracked_points[a_label]
 
         if a_label in self.detector.hands and b_label in self.detector.hands:
             ha = self.detector.hands[a_label]
@@ -384,36 +336,23 @@ class AR:
         self._normalize_ghost_genframes(b_label)
 
     def _reconcile_handedness(self, detections):
-        """
-        TRUE ZERO-TRUST RECONCILIATION:
-        Treats MediaPipe's output as anonymous blobs. Assigns "LEFT" or "RIGHT"
-        strictly based on spatial history and process of elimination.
-        Relabels the incoming detection directly without corrupting history.
-        """
         if not detections:
             return
 
-        # 1. Strip labels. Treat as anonymous blobs. 
-        # Create list of (original_idx, wrist_px, lm_set)
         blobs = [(i, d[1], d[2]) for i, d in enumerate(detections) if d[1] is not None]
-        
         if not blobs:
             return
 
-        # Get the last guaranteed real position for both hands
         tracked = {
             "LEFT": self._last_real_wrist("LEFT"),
             "RIGHT": self._last_real_wrist("RIGHT")
         }
 
-        # 25% of the screen is our max allowance for real-world fast movement
         MAX_JUMP = max(self.W, self.H) * 0.25 
-
         assigned_blobs = set()
         assigned_labels = set()
         final_assignments = {}
 
-        # 2. CONTINUITY MATCHING: Map blobs to history based on shortest distance
         pairs = []
         for b_idx, wrist_px, _ in blobs:
             for label, last_pos in tracked.items():
@@ -422,7 +361,6 @@ class AR:
                     if dist < MAX_JUMP:
                         pairs.append((dist, b_idx, label))
         
-        # Sort by shortest distance and assign greedily
         pairs.sort(key=lambda x: x[0])
         for dist, b_idx, label in pairs:
             if b_idx not in assigned_blobs and label not in assigned_labels:
@@ -430,28 +368,21 @@ class AR:
                 assigned_blobs.add(b_idx)
                 assigned_labels.add(label)
 
-        # 3. HANDLE UNASSIGNED BLOBS (Newly appeared hands without valid history)
         unassigned_blobs = [b for b in blobs if b[0] not in assigned_blobs]
         
-        # Scenario A: Both hands appeared on screen at the exact same time
         if len(unassigned_blobs) == 2 and len(assigned_labels) == 0:
-            # Sort them horizontally. Leftmost is LEFT, Rightmost is RIGHT.
             unassigned_blobs.sort(key=lambda b: b[1][0])
             final_assignments[unassigned_blobs[0][0]] = "LEFT"
             final_assignments[unassigned_blobs[1][0]] = "RIGHT"
             assigned_labels.update(["LEFT", "RIGHT"])
-            
-        # Scenario B: Assign remaining hands one by one
         else:
             for b_idx, wrist_px, _ in unassigned_blobs:
                 avail_labels = [L for L in ["LEFT", "RIGHT"] if L not in assigned_labels]
                 if not avail_labels:
-                    break # No labels left to assign
+                    break 
                 
-                # Process of elimination (If LEFT is taken, this must be RIGHT)
                 if len(avail_labels) == 1:
                     label = avail_labels[0]
-                # Screen splitting fallback (If tracking is lost, use screen halves)
                 else:
                     label = "LEFT" if wrist_px[0] < self.W / 2 else "RIGHT"
                 
@@ -459,24 +390,14 @@ class AR:
                 assigned_labels.add(label)
                 assigned_blobs.add(b_idx)
 
-        # 4. OVERRIDE MEDIAPIPE
         for i, (orig_label, wrist_px, lm_set) in enumerate(detections):
             if i in final_assignments:
                 new_label = final_assignments[i]
                 if new_label != orig_label:
                     self._log('CORE', f"ZERO-TRUST OVERRIDE: Forced MediaPipe's {orig_label} to become {new_label}", True)
-                
-                # Update the detection tuple in place. History is protected!
                 detections[i] = (new_label, wrist_px, lm_set)
 
-    # -------------------------
-    # Fixed generate_frames
-    # -------------------------
     def generate_frames(self, velocity, label):
-        """
-        Generate ghost landmarks by applying rotation about wrist + translation.
-        Enforces Rigid Body Kinematics so the hand does not deform or squash.
-        """
         hist = self.position_histogram[label]
         
         if len(hist) > 0 :
@@ -499,28 +420,23 @@ class AR:
         if isinstance(velocity, (list, tuple)) and len(velocity) >= 3:
             dx, dy, dtheta = float(velocity[0]), float(velocity[1]), float(velocity[2])
 
-        # 1. Clamp Angular Velocity (prevent "helicopter" spinning)
-        MAX_DTHETA = 0.35 # ~20 degrees max rotation per frame
+        MAX_DTHETA = 0.35 
         dtheta = max(-MAX_DTHETA, min(MAX_DTHETA, dtheta))
 
-        # 2. Clamp Translation globally (prevents the skeleton from deforming)
-        max_jump = max(self.W, self.H) * 0.15 # 15% of screen max per frame
+        max_jump = max(self.W, self.H) * 0.15 
         speed = math.hypot(dx, dy)
         if speed > max_jump:
             scale = max_jump / speed
             dx *= scale
             dy *= scale
 
-        # compute base wrist if available
         base_wrist = None
         if isinstance(base_pts, list) and len(base_pts) > WRIST_IDX:
             w = base_pts[WRIST_IDX]
-            if w and w != self.INVALID_POINT:
+            if w:
                 base_wrist = (float(w[0]), float(w[1]))
 
-        # rotation helper
         def rotate_point(px, py, cx, cy, ang):
-            # rotate (px,py) around center (cx,cy) by ang radians CCW
             s = math.sin(ang); c = math.cos(ang)
             x = px - cx; y = py - cy
             rx = x * c - y * s
@@ -538,10 +454,8 @@ class AR:
                 new_x = px + dx
                 new_y = py + dy
 
-            # Just append directly. Allow off-screen negatives!
             gen.add(new_x, new_y)
 
-        # adaptive age suggestion 
         lin_speed = math.hypot(dx, dy)
         ang_speed = abs(dtheta)
         speed_factor = lin_speed + (ang_speed * 50.0)
@@ -552,26 +466,19 @@ class AR:
         gen._meta_gen_frame = self.frame_count
         gen._meta_age = adaptive_age
 
-        self._log('DEBUG', f"[AR] GENERATED GHOST {label} lin={lin_speed:.2f} ang={ang_speed:.3f} age={adaptive_age}", True)
         return gen
 
     def _prune_ghosts_on_real(self, label):
-        """
-        Ruthlessly purges all ghost frames from the history the moment a real hand is detected.
-        This prevents predictive tracking errors from compounding.
-        """
         hist = self.position_histogram[label]
         if not hist:
             return False
             
         changed = False
-        # Filter the history to ONLY keep real frames
         pure_real_hist = [e for e in hist if e.get("source") == self.SOURCE_REAL]
         
         if len(pure_real_hist) != len(hist):
             changed = True
             
-        # Replace the polluted histogram with the purified one
         self.position_histogram[label].clear()
         self.position_histogram[label].extend(pure_real_hist)
         
@@ -592,6 +499,9 @@ class AR:
             return
 
         self.frame_count += 1
+        
+        # Convert to Grayscale for Optical Flow Tracker
+        current_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         ar_data = {
             "POSITION_DATA": {"LEFT": [], "RIGHT": []},
@@ -608,46 +518,43 @@ class AR:
 
         seen = []
 
-        # 1. Prune old ghosts purely by age
         for label in ("LEFT", "RIGHT"):
             self._prune_ghosts_by_age(label)
 
-        # 2. Extract RAW detections
         detections = []
         if getattr(res, 'multi_hand_landmarks', None):
             for lm_set, handedness in zip(res.multi_hand_landmarks, res.multi_handedness):
                 label = handedness.classification[0].label.upper()
                 try:
                     lm_w = lm_set.landmark[WRIST_IDX]
-                    lx = float(lm_w.x); ly = float(lm_w.y)
-                    if self._is_normalized(lx, ly):
-                        wrist_px = (lx * self.W, ly * self.H)
-                    else:
-                        wrist_px = (lx, ly)
+                    # FIX: Blindly multiply proportional coordinates
+                    wrist_px = (float(lm_w.x) * self.W, float(lm_w.y) * self.H)
                 except Exception:
                     wrist_px = None
                 
                 detections.append((label, wrist_px, lm_set))
 
-            # 3. Reconcile Handedness (Zero-Trust Policy)
             if len(detections) > 0:
                 self._reconcile_handedness(detections)
 
-            # 4. Process valid, reconciled hands
             for i, (label, wrist_px, lm_set) in enumerate(detections):
                 seen.append(label)
 
                 landmarks_norm = [(lm.x, lm.y) for lm in lm_set.landmark]
                 d = self.detector.update(label, landmarks_norm)
 
-                # Prevent clicks if the hand is flickering
                 if self.presence_counter[label] < self.presence_threshold_on:
                     d["is_pinched"] = False
 
                 pts = self.calculate_hand_points(lm_set, label, is_generated=False)
+                
+                # OPTICAL FLOW SETUP: When real hand is detected, save Wrist & Middle MCP to track
+                w = pts[WRIST_IDX]
+                m = pts[MIDDLE_MCP_IDX]
+                if w and m:
+                    self.lk_tracked_points[label] = np.array([[w], [m]], dtype=np.float32)
 
                 try:
-                    # Purge ghosts entirely upon finding reality
                     self._prune_ghosts_on_real(label)
                 except Exception:
                     pass
@@ -660,7 +567,7 @@ class AR:
 
                 self.hands_tracker[label] = 0
 
-        # 5. UNIFIED missing hand logic (handles both 1 missing hand or no hands detected)
+        # UNIFIED missing hand logic + OPTICAL FLOW TRACKING
         for label in ("LEFT", "RIGHT"):
             if label not in seen:
                 self.hands_tracker[label] += 1
@@ -668,37 +575,72 @@ class AR:
 
                 ghost_pts = []
                 
-                # A. Capture velocity exactly on the frame it gets lost
                 if self.hands_tracker[label] == 1:
                     real_hist = [e for e in self.position_histogram[label] if e.get("source") == self.SOURCE_REAL]
                     
-                    # ANTI-PHANTOM CHECK: 
-                    # Only spawn ghosts if this hand was solid reality for at least 3 frames.
                     if len(real_hist) >= 3:
                         self.ghost_velocity[label] = self.calculate_velocity(label, dir=1)
                         self.ghost_ttl_counter[label] = self.MAX_GHOST_TTL
                     else:
                         self.ghost_velocity[label] = [0.0, 0.0, 0.0]
                         self.ghost_ttl_counter[label] = 0
+                        self.lk_tracked_points[label] = None # Invalidate Optical Flow
                     
-                # B. Generate ghosts using Kinematic Friction & TTL
                 if self.ghost_ttl_counter[label] > 0 and self.hands_tracker[label] < self.absent_reset_threshold:
-                    # Apply friction deceleration (graceful braking)
-                    self.ghost_velocity[label][0] *= self.KINEMATIC_FRICTION
-                    self.ghost_velocity[label][1] *= self.KINEMATIC_FRICTION
-                    self.ghost_velocity[label][2] *= self.KINEMATIC_FRICTION
                     
-                    ghost = self.generate_frames(self.ghost_velocity[label], label)
+                    flow_success = False
+                    
+                    # 1. ATTEMPT OPTICAL FLOW (Track physical pixels)
+                    if self.lk_tracked_points[label] is not None and self.prev_gray is not None:
+                        p1, st, err = cv2.calcOpticalFlowPyrLK(
+                            self.prev_gray, current_gray, self.lk_tracked_points[label], None, **self.lk_params
+                        )
+                        
+                        # If both wrist and middle MCP were found
+                        if st is not None and len(st) == 2 and st[0][0] == 1 and st[1][0] == 1:
+                            p0 = self.lk_tracked_points[label].reshape(2, 2)
+                            p1_flat = p1.reshape(2, 2)
+                            
+                            # Measure how much the pixels actually moved
+                            dx = p1_flat[0][0] - p0[0][0]
+                            dy = p1_flat[0][1] - p0[0][1]
+                            
+                            v_old = (p0[1][0] - p0[0][0], p0[1][1] - p0[0][1])
+                            v_new = (p1_flat[1][0] - p1_flat[0][0], p1_flat[1][1] - p1_flat[0][1])
+                            
+                            dtheta = 0.0
+                            if not ((v_old[0] == 0 and v_old[1] == 0) or (v_new[0] == 0 and v_new[1] == 0)):
+                                dtheta = self._normalize_angle(self._angle_between(v_old, v_new))
+                                
+                            # Apply precise pixel movement
+                            vel = [dx, dy, dtheta]
+                            ghost = self.generate_frames(vel, label)
+                            
+                            # Sync the kinetic engine to this physical movement
+                            self.ghost_velocity[label] = vel 
+                            self.lk_tracked_points[label] = p1
+                            flow_success = True
+                            self._log('CORE', f'OPTICAL FLOW TRACKED {label}', True)
+
+                    # 2. FALLBACK TO KINEMATIC FRICTION (If hand occluded or left screen)
+                    if not flow_success:
+                        self.ghost_velocity[label][0] *= self.KINEMATIC_FRICTION
+                        self.ghost_velocity[label][1] *= self.KINEMATIC_FRICTION
+                        self.ghost_velocity[label][2] *= self.KINEMATIC_FRICTION
+                        vel = self.ghost_velocity[label]
+                        ghost = self.generate_frames(vel, label)
+                        
+                        # Invalidate tracking points so it doesn't try tracking background pixels
+                        self.lk_tracked_points[label] = None 
+                        self._log('CORE', f'KINEMATIC FALLBACK FOR {label}', True)
+
                     if ghost is not None:
                         ghost_pts = self.calculate_hand_points(ghost, label, is_generated=True)
-                        self._log('CORE', f'GENERATED GHOST FOR {label} (TTL: {self.ghost_ttl_counter[label]})', True)
                     
                     self.ghost_ttl_counter[label] -= 1
                 else:
-                    # Ensure velocity is zeroed out if TTL expires or hand is long absent
                     self.ghost_velocity[label] = [0.0, 0.0, 0.0]
                 
-                # C. Final state sync 
                 if ghost_pts and len(ghost_pts) > 0:
                     ar_data["FRAME_TYPE"][label] = "GHOST"
                     ar_data["POSITION_DATA"][label] = ghost_pts
@@ -710,7 +652,6 @@ class AR:
                 ar_data["CLICK_DIST"][label] = 0
                 ar_data["SCALE"][label] = 1
 
-                # D. Deep cleanup for hands gone too long
                 if self.hands_tracker[label] >= self.absent_reset_threshold:
                     if len(self.position_histogram[label]) > 0:
                         self._log('CORE', f'CLEARING HISTOGRAM FOR {label} DUE TO LONG ABSENCE', True)
@@ -720,8 +661,11 @@ class AR:
                     except Exception:
                         pass
 
-        # 6. Global Hand Presence Check
         ar_data["HAND_PRESENCE"] = any(self.presence_counter[label] >= self.presence_threshold_on for label in ("LEFT","RIGHT"))
 
         self.ar_data = ar_data
+        
+        # Save current frame for the next Optical Flow pass
+        self.prev_gray = current_gray 
+        
         return ar_data
