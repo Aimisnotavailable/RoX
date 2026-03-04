@@ -30,31 +30,45 @@ python demo_rox_demo.py
 
 ### Screen-to-World Raycasting
 
-Mapping a 2D mouse or finger coordinate on a webcam feed to a 3D voxel requires reconstructing the entire graphics pipeline in reverse. To find the world-space position \( \mathbf{P}_{\text{world}} \), we transform Normalized Device Coordinates \( \mathbf{P}_{\text{ndc}} \) through the inverse of the View–Projection matrix:
+Mapping a 2D mouse or finger coordinate on a webcam feed to a 3D voxel requires reconstructing the entire graphics pipeline in reverse.
 
-\[
-\mathbf{P}_{\text{world},h} = \bigl(\mathbf{M}_{\text{proj}} \cdot \mathbf{M}_{\text{view}}\bigr)^{-1} \cdot \mathbf{P}_{\text{ndc}}
-\]
+To find the world-space position:
 
-Since this result is in homogeneous coordinates, perform the perspective divide to reach the final 3D world coordinate:
+$$
+\mathbf{P}_{world,h} =
+\left(\mathbf{M}_{proj} \cdot \mathbf{M}_{view}\right)^{-1}
+\cdot
+\mathbf{P}_{ndc}
+$$
 
-\[
-\mathbf{P}_{\text{world}} = \frac{\mathbf{P}_{\text{world},h}.xyz}{\mathbf{P}_{\text{world},h}.w}
-\]
+Since this result is in homogeneous coordinates, perform the perspective divide:
+
+$$
+\mathbf{P}_{world} =
+\frac{\mathbf{P}_{world,h}.xyz}
+{\mathbf{P}_{world,h}.w}
+$$
+
+---
 
 ### The Ghost Frame Hybrid Tracking
 
-Raw computer vision is fragile. Motion blur and occlusion often cause tracking to drop. RoX treats the hand as a physical object with momentum. When tracking is lost, the engine calculates the average velocity over the last \(n\) frames:
+The average velocity over the last $n$ frames:
 
-\[
-\vec{V}_{\text{avg}} = \frac{1}{n} \sum_{i=1}^{n} \frac{\vec{P}_i - \vec{P}_{i-1}}{f_i - f_{i-1}}
-\]
+$$
+\vec{V}_{avg} =
+\frac{1}{n}
+\sum_{i=1}^{n}
+\frac{\vec{P}_i - \vec{P}_{i-1}}
+{f_i - f_{i-1}}
+$$
 
-The engine then injects *Ghost Frames* that advance the hand's skeletal position along this trajectory. To ensure a natural feel, a kinematic friction coefficient \(K_{\text{friction}}\) is applied to decay the momentum over time:
+Momentum decay with kinematic friction:
 
-\[
-\vec{V}_{t+1} = \vec{V}_t \cdot K_{\text{friction}}
-\]
+$$
+\vec{V}_{t+1} =
+\vec{V}_t \cdot K_{friction}
+$$
 
 ---
 
@@ -92,13 +106,3 @@ python 2Drox.py
 ```
 
 ---
-
-## Troubleshooting: Images and Math Rendering
-
-- **Badges / images not rendering:** Ensure your Markdown renderer allows external images. If you are viewing the file locally, some viewers block remote images; try opening the file in GitHub or enable remote images in your viewer.
-- **Math not rendering:** Math blocks use LaTeX. If your renderer does not support MathJax or KaTeX, formulas will appear as plain text. On GitHub, use fenced math with `$$ ... $$` for display math; many static viewers require enabling math rendering or using a plugin.
-- **Local preview tips:** Use a Markdown viewer that supports MathJax/KaTeX (e.g., VS Code with a math extension) or view the file on GitHub to see badges and LaTeX rendered correctly.
-
----
-
-If you still see visual artifacts or rendering issues after these fixes, check your Markdown viewer settings (remote images enabled, math rendering enabled) and confirm your GPU drivers and ModernGL installation are up to date.
