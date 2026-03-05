@@ -87,13 +87,13 @@ class AR:
         self.presence_counter = {'LEFT': 0, 'RIGHT': 0}
         self.presence_threshold_on = 2   
         self.presence_threshold_off = -2 
-        self.absent_reset_threshold = HISTOGRAM_SIZE * 2
+        self.absent_reset_threshold = HISTOGRAM_SIZE
         self.pinch_absent_reset = max(3, HISTOGRAM_SIZE // 2)
         
         # --- GHOST KINEMATICS & TTL ---
         self.ghost_velocity = {'LEFT': [0.0, 0.0, 0.0], 'RIGHT': [0.0, 0.0, 0.0]}
         self.KINEMATIC_FRICTION = 0.85 
-        self.MAX_GHOST_TTL = 10 
+        self.MAX_GHOST_TTL = HISTOGRAM_SIZE - 1 
         self.ghost_ttl_counter = {'LEFT': 0, 'RIGHT': 0}
         self.ghost_age_default = 2
         
@@ -335,12 +335,31 @@ class AR:
         self._normalize_ghost_genframes(a_label)
         self._normalize_ghost_genframes(b_label)
     
-    # Fix hadn duplication due to incorrect labeling when going out of bounds
+    def _get_continuous_streak(self, label):
+        hist = self.position_histogram.get(label, [])
+        if not hist: 
+            return 0
+        
+        streak = 1
+        last_f = hist[-1].get("frame", -1)
+        
+        # Walk backward through history to check for frame gaps
+        for i in range(len(hist)-2, -1, -1):
+            f = hist[i].get("frame", -1)
+            # If the gap between recorded frames is > 1, a blackout occurred. The streak is broken.
+            if last_f - f > 1:
+                break
+            streak += 1
+            last_f = f
+            
+        return streak
+
     def _reconcile_handedness(self, detections):
         if not detections:
             return
 
-        blobs = [(i, d[1], d[2]) for i, d in enumerate(detections) if d[1] is not None]
+        # 1. Bring the original MediaPipe label (d[0]) into the blob
+        blobs = [(i, d[0], d[1], d[2]) for i, d in enumerate(detections) if d[1] is not None]
         if not blobs:
             return
 
@@ -349,16 +368,33 @@ class AR:
             "RIGHT": self._last_real_wrist("RIGHT")
         }
 
-        MAX_JUMP = max(self.W, self.H) * 0.25 
+        # 2. Tighten bounds to 10% of screen
+        MAX_JUMP = max(self.W, self.H) * 0.10 
         assigned_blobs = set()
         assigned_labels = set()
         final_assignments = {}
 
         pairs = []
-        for b_idx, wrist_px, _ in blobs:
+        for b_idx, orig_label, wrist_px, _ in blobs:
             for label, last_pos in tracked.items():
                 if last_pos is not None:
                     dist = math.hypot(wrist_px[0] - last_pos[0], wrist_px[1] - last_pos[1])
+                    
+                    if orig_label != label:
+                        # 1. THE STEAL RADIUS: Prevent stealing hands from across the screen
+                        # It must be incredibly close to the old history to even be considered for a steal.
+                        if dist > (MAX_JUMP * 0.25):
+                            continue 
+                            
+                        # 2. THE FRESHNESS CHECK: Only fresh, strong tracks can steal.
+                        track_length = len(self.position_histogram[label])
+                        frames_absent = self.hands_tracker[label]
+                        if frames_absent > 2 or track_length < 5:
+                            continue 
+                            
+                        # If it survived the strict checks, apply the penalty
+                        dist += (MAX_JUMP * 0.6)
+
                     if dist < MAX_JUMP:
                         pairs.append((dist, b_idx, label))
         
@@ -371,18 +407,30 @@ class AR:
 
         unassigned_blobs = [b for b in blobs if b[0] not in assigned_blobs]
         
+        # 4. HIERARCHY OF TRUST (Don't blind-split the screen if both hands appear)
         if len(unassigned_blobs) == 2 and len(assigned_labels) == 0:
-            unassigned_blobs.sort(key=lambda b: b[1][0])
-            final_assignments[unassigned_blobs[0][0]] = "LEFT"
-            final_assignments[unassigned_blobs[1][0]] = "RIGHT"
-            assigned_labels.update(["LEFT", "RIGHT"])
+            label_0 = unassigned_blobs[0][1] 
+            label_1 = unassigned_blobs[1][1]
+            
+            if label_0 != label_1 and label_0 in ["LEFT", "RIGHT"] and label_1 in ["LEFT", "RIGHT"]:
+                final_assignments[unassigned_blobs[0][0]] = label_0
+                final_assignments[unassigned_blobs[1][0]] = label_1
+                assigned_labels.update([label_0, label_1])
+            else:
+                self._log('CORE', "MediaPipe duplicate labels detected. Falling back to Spatial Partitioning.", True)
+                unassigned_blobs.sort(key=lambda b: b[2][0]) 
+                final_assignments[unassigned_blobs[0][0]] = "LEFT"
+                final_assignments[unassigned_blobs[1][0]] = "RIGHT"
+                assigned_labels.update(["LEFT", "RIGHT"])
         else:
-            for b_idx, wrist_px, _ in unassigned_blobs:
+            for b_idx, orig_label, wrist_px, _ in unassigned_blobs:
                 avail_labels = [L for L in ["LEFT", "RIGHT"] if L not in assigned_labels]
                 if not avail_labels:
                     break 
                 
-                if len(avail_labels) == 1:
+                if orig_label in avail_labels:
+                    label = orig_label
+                elif len(avail_labels) == 1:
                     label = avail_labels[0]
                 else:
                     label = "LEFT" if wrist_px[0] < self.W / 2 else "RIGHT"
@@ -395,7 +443,17 @@ class AR:
             if i in final_assignments:
                 new_label = final_assignments[i]
                 if new_label != orig_label:
-                    self._log('CORE', f"ZERO-TRUST OVERRIDE: Forced MediaPipe's {orig_label} to become {new_label}", True)
+                    self._log('CORE', f"ZERO-TRUST OVERRIDE: Forced MediaPipe's {orig_label} to become {new_label} at frame : {self.frame_count}", True)
+                    # self._log('DEBUG', f"POSITION HISTOGRAM AT SWITCHING {self.position_histogram}", True)
+                    self.lk_tracked_points[orig_label] = None
+                    # 2. Kill Kinematic Decay (Wipe momentum/spatial memory)
+                    if orig_label in self.position_histogram:
+                        self.position_histogram[orig_label].clear()
+                    
+                    # 3. Force instant expiration so it doesn't enter the GHOST state at all
+                    if orig_label in self.hands_tracker:
+                        self.hands_tracker[orig_label] = self.MAX_GHOST_TTL + 1
+                        
                 detections[i] = (new_label, wrist_px, lm_set)
 
     def generate_frames(self, velocity, label):
@@ -625,15 +683,29 @@ class AR:
 
                     # 2. FALLBACK TO KINEMATIC FRICTION (If hand occluded or left screen)
                     if not flow_success:
-                        self.ghost_velocity[label][0] *= self.KINEMATIC_FRICTION
-                        self.ghost_velocity[label][1] *= self.KINEMATIC_FRICTION
-                        self.ghost_velocity[label][2] *= self.KINEMATIC_FRICTION
+                        # Calculate current speed
+                        vx, vy, vtheta = self.ghost_velocity[label]
+                        speed = math.hypot(vx, vy)
+                        
+                        # STATIC FRICTION CUTOFF: If moving too slow, snap to a halt to prevent infinite drifting
+                        if speed < 2.0:
+                            self.ghost_velocity[label] = [0.0, 0.0, 0.0]
+                            self._log('CORE', f'KINEMATIC HALT FOR {label}', True)
+                        else:
+                            # Apply dynamic friction
+                            self.ghost_velocity[label][0] *= self.KINEMATIC_FRICTION
+                            self.ghost_velocity[label][1] *= self.KINEMATIC_FRICTION
+                            
+                            # Angular momentum (rotation) should decay much faster than linear momentum
+                            self.ghost_velocity[label][2] *= (self.KINEMATIC_FRICTION * 0.7) 
+                            
+                            self._log('CORE', f'KINEMATIC DECAY FOR {label}', True)
+
                         vel = self.ghost_velocity[label]
                         ghost = self.generate_frames(vel, label)
                         
                         # Invalidate tracking points so it doesn't try tracking background pixels
-                        self.lk_tracked_points[label] = None 
-                        self._log('CORE', f'KINEMATIC FALLBACK FOR {label}', True)
+                        self.lk_tracked_points[label] = None
 
                     if ghost is not None:
                         ghost_pts = self.calculate_hand_points(ghost, label, is_generated=True)
@@ -641,6 +713,18 @@ class AR:
                     self.ghost_ttl_counter[label] -= 1
                 else:
                     self.ghost_velocity[label] = [0.0, 0.0, 0.0]
+                    # --- NEW AGGRESSIVE RESET LOGIC ---
+                    if self.hands_tracker[label] > self.MAX_GHOST_TTL:
+                        if len(self.position_histogram[label]) > 0:
+                            self._log('CORE', f'GHOST EXPIRED: Wiping spatial memory for {label}', True)
+                            self.position_histogram[label].clear()
+                            # -> THIS IS THE KILL SWITCH <-
+                            self.lk_tracked_points[label] = None
+                            
+                            try:
+                                self.detector.reset(label)
+                            except Exception:
+                                pass
                 
                 if ghost_pts and len(ghost_pts) > 0:
                     ar_data["FRAME_TYPE"][label] = "GHOST"
@@ -652,15 +736,6 @@ class AR:
                 ar_data["CLICK_FLAG"][label] = False
                 ar_data["CLICK_DIST"][label] = 0
                 ar_data["SCALE"][label] = 1
-
-                if self.hands_tracker[label] >= self.absent_reset_threshold:
-                    if len(self.position_histogram[label]) > 0:
-                        self._log('CORE', f'CLEARING HISTOGRAM FOR {label} DUE TO LONG ABSENCE', True)
-                        self.position_histogram[label].clear()
-                    try:
-                        self.detector.reset(label)
-                    except Exception:
-                        pass
 
         ar_data["HAND_PRESENCE"] = any(self.presence_counter[label] >= self.presence_threshold_on for label in ("LEFT","RIGHT"))
 
