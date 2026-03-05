@@ -8,3 +8,4 @@ colorama
 moderngl
 pyglm
 Pillow
+imageio

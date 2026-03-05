@@ -6,9 +6,9 @@ from src.engine3d import GraphicsEngine3D
 
 class RoX:
 
-    def __init__(self, type = "2D"):
+    def __init__(self, type = "2D", winsize=(WIDTH, HEIGHT)):
         self.type = type
-        self.engine = GraphicsEngine2D() if self.type == "2D" else GraphicsEngine3D()
+        self.engine = GraphicsEngine2D(winsize) if self.type == "2D" else GraphicsEngine3D(winsize)
 
     def run(self):
         self.engine.run()

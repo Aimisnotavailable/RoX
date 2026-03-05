@@ -15,7 +15,7 @@ COLOR_TEXT = (255, 255, 255)
 COLOR_UI_BG = (0, 0, 0, 150) # Semi-transparent black
 
 class GraphicsEngine3D:
-    def __init__(self, win_size=(1280, 720)):
+    def __init__(self, win_size=(WIDTH,  HEIGHT)):
         pygame.init()
         self.WIN_SIZE = win_size
         

@@ -40,15 +40,16 @@ class BlockWorld:
         return False
 
 class GraphicsEngine2D:
-    def __init__(self):
+    def __init__(self, win_size=(WIDTH, HEIGHT)):
         pygame.init()
-        self.WIDTH, self.HEIGHT = 1280, 720
+        self.WIDTH, self.HEIGHT = win_size
         self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
         pygame.display.set_caption("RoX 2D Mode")
         self.clock = pygame.time.Clock()
 
         # AR & Input Setup
-        self.ar = AR()
+        self.cap = cv2.VideoCapture(0)
+        self.ar = AR(win_size)
         self.input_handler = ARInputHandler(self) 
 
         # Game World
@@ -63,8 +64,11 @@ class GraphicsEngine2D:
 
     def handle_input(self):
         # 1. Update AR Input Handler
-        self.input_handler.update(self.ar.ar_data)
-        
+        ret, frame = self.cap.read()
+        if ret:
+            self.ar.update(frame)
+            self.input_handler.update(self.ar.ar_data)
+
         # 2. Get Data from Handler
         l_state = self.input_handler.left_state
         r_state = self.input_handler.right_state
@@ -137,12 +141,79 @@ class GraphicsEngine2D:
                 # Border
                 pygame.draw.rect(self.screen, (50, 100, 50), (sx - size/2, sy - size/2, size, size), 2)
 
+    def render_hands(self, surf):
+        """
+        Render hand landmarks stored in self.ar.ar_data onto the given pygame surface.
+        Expects POSITION_DATA entries to be lists of pixel tuples or the sentinel (-1,-1)
+        for invalid/missing joints. Uses self.ar.INVALID_POINT as the sentinel.
+        """
+        if not self.ar.ar_data.get("HAND_PRESENCE"):
+            get_logger_info('AR', '[AR] FAILED TO DETECT HANDS', True)
+            return
+
+        INVALID = getattr(self.ar, "INVALID_POINT", (-1, -1))
+
+        # Try to obtain HAND_CONNECTIONS in a safe way
+        try:
+            HAND_CONNECTIONS = self.ar.mp_hands.HAND_CONNECTIONS
+        except Exception:
+            try:
+                from mediapipe.python.solutions.hands import HAND_CONNECTIONS
+            except Exception:
+                HAND_CONNECTIONS = [(0,1),(1,2),(2,3),(3,4),(0,5),(5,9),(9,13),(13,17),(17,0)]
+
+        for label in ("LEFT", "RIGHT"):
+            pts = self.ar.ar_data.get('POSITION_DATA', {}).get(label, [])
+            if not pts:
+                continue
+
+            # draw connections only if both endpoints are valid
+            # compute max index safely
+            try:
+                max_idx = max(max(c) for c in HAND_CONNECTIONS)
+            except Exception:
+                max_idx = -1
+
+            if len(pts) > max_idx:
+                for a_idx, b_idx in HAND_CONNECTIONS:
+                    # ensure indices exist
+                    if a_idx >= len(pts) or b_idx >= len(pts):
+                        continue
+                    pa = pts[a_idx]
+                    pb = pts[b_idx]
+                    # both endpoints must be valid (not sentinel and not None)
+                    if pa and pb and pa != INVALID and pb != INVALID:
+                        try:
+                            pygame.draw.line(surf, (0, 0, 255), (int(pa[0]), int(pa[1])), (int(pb[0]), int(pb[1])), 1)
+                        except Exception:
+                            # defensive: skip any drawing errors
+                            continue
+
+            # draw landmark points (preserve index positions; skip invalids)
+            for p in pts:
+                if not p or p == INVALID:
+                    continue
+                try:
+                    cx = int(round(p[0])); cy = int(round(p[1]))
+                    pygame.draw.circle(surf, (255, 255, 255), (cx, cy), 2)
+                except Exception:
+                    # if p is malformed, skip it
+                    continue
+
+                color = (200, 80, 80) if label == "LEFT" else (80, 80, 200)
+                p = pts[WRIST_IDX] if len(pts) > WRIST_IDX else max_idx
+                pygame.draw.circle(surf, color, p, 10, 2)
+                font = pygame.font.SysFont("Arial", 14)
+                txt = font.render(f"{label}", True, color)
+                surf.blit(txt, (max(0, p[0]-20), max(0, p[1]-30)))
+
+
     def render(self):
         self.screen.fill((0, 0, 0, 0))
         # 2. Draw blocks on top of camera feed
         # CORE LOOP
         # 1. Draw AR Feed FIRST (This acts as the background clear)
-        self.ar.render(self.screen) 
+        self.render_hands(self.screen)
         
         # 2. Logic
         self.handle_input()
@@ -202,4 +273,4 @@ class GraphicsEngine2D:
 
             self.render()
             
-            self.clock.tick(60)
+            self.clock.tick()

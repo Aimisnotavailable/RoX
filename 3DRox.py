@@ -1,8 +1,9 @@
+from scripts.config import *
 from rox import RoX
 
 class RoX3D(RoX):
 
-    def __init__(self):
-        super().__init__("3D")
+    def __init__(self, winsize=(WIDTH, HEIGHT)):
+        super().__init__("3D", winsize)
 
 RoX3D().run()

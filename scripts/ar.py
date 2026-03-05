@@ -334,7 +334,8 @@ class AR:
         
         self._normalize_ghost_genframes(a_label)
         self._normalize_ghost_genframes(b_label)
-
+    
+    # Fix hadn duplication due to incorrect labeling when going out of bounds
     def _reconcile_handedness(self, detections):
         if not detections:
             return
