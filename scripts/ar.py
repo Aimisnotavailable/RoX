@@ -358,7 +358,6 @@ class AR:
         if not detections:
             return
 
-        # 1. Bring the original MediaPipe label (d[0]) into the blob
         blobs = [(i, d[0], d[1], d[2]) for i, d in enumerate(detections) if d[1] is not None]
         if not blobs:
             return
@@ -368,7 +367,6 @@ class AR:
             "RIGHT": self._last_real_wrist("RIGHT")
         }
 
-        # 2. Tighten bounds to 10% of screen
         MAX_JUMP = max(self.W, self.H) * 0.10 
         assigned_blobs = set()
         assigned_labels = set()
@@ -381,19 +379,13 @@ class AR:
                     dist = math.hypot(wrist_px[0] - last_pos[0], wrist_px[1] - last_pos[1])
                     
                     if orig_label != label:
-                        # 1. THE STEAL RADIUS: Prevent stealing hands from across the screen
-                        # It must be incredibly close to the old history to even be considered for a steal.
-                        if dist > (MAX_JUMP * 0.25):
-                            continue 
-                            
-                        # 2. THE FRESHNESS CHECK: Only fresh, strong tracks can steal.
                         track_length = len(self.position_histogram[label])
                         frames_absent = self.hands_tracker[label]
+                        
                         if frames_absent > 2 or track_length < 5:
-                            continue 
-                            
-                        # If it survived the strict checks, apply the penalty
-                        dist += (MAX_JUMP * 0.6)
+                            dist += (MAX_JUMP * 2.0)
+                        else:
+                            dist += (MAX_JUMP * 0.6)
 
                     if dist < MAX_JUMP:
                         pairs.append((dist, b_idx, label))
@@ -407,7 +399,37 @@ class AR:
 
         unassigned_blobs = [b for b in blobs if b[0] not in assigned_blobs]
         
-        # 4. HIERARCHY OF TRUST (Don't blind-split the screen if both hands appear)
+        # --- THE DOUBLE-BOX HALLUCINATION FIX ---
+        # MediaPipe sometimes draws two overlapping bounding boxes on one physical hand.
+        # We must filter out any unassigned blob that is physically touching an already verified hand.
+        filtered_unassigned = []
+        for b in unassigned_blobs:
+            b_idx, orig_label, wrist_px, _ = b
+            is_dup = False
+            
+            # Check against finalized tracks
+            for a_idx, a_label in final_assignments.items():
+                a_wrist = detections[a_idx][1]
+                if math.hypot(wrist_px[0] - a_wrist[0], wrist_px[1] - a_wrist[1]) < (MAX_JUMP * 0.5):
+                    is_dup = True
+                    break
+            
+            # Check against other valid unassigned blobs
+            if not is_dup:
+                for a in filtered_unassigned:
+                    a_wrist = a[2]
+                    if math.hypot(wrist_px[0] - a_wrist[0], wrist_px[1] - a_wrist[1]) < (MAX_JUMP * 0.5):
+                        is_dup = True
+                        break
+            
+            if is_dup:
+                self._log('CORE', "DROPPED: MediaPipe hallucinated an overlapping duplicate hand.", True)
+            else:
+                filtered_unassigned.append(b)
+                
+        unassigned_blobs = filtered_unassigned
+
+        # Hierarchy of Trust
         if len(unassigned_blobs) == 2 and len(assigned_labels) == 0:
             label_0 = unassigned_blobs[0][1] 
             label_1 = unassigned_blobs[1][1]
@@ -439,22 +461,16 @@ class AR:
                 assigned_labels.add(label)
                 assigned_blobs.add(b_idx)
 
+        # Mutate detections in place to completely erase the dropped duplicates
+        valid_detections = []
         for i, (orig_label, wrist_px, lm_set) in enumerate(detections):
             if i in final_assignments:
                 new_label = final_assignments[i]
                 if new_label != orig_label:
-                    self._log('CORE', f"ZERO-TRUST OVERRIDE: Forced MediaPipe's {orig_label} to become {new_label} at frame : {self.frame_count}", True)
-                    # self._log('DEBUG', f"POSITION HISTOGRAM AT SWITCHING {self.position_histogram}", True)
-                    self.lk_tracked_points[orig_label] = None
-                    # 2. Kill Kinematic Decay (Wipe momentum/spatial memory)
-                    if orig_label in self.position_histogram:
-                        self.position_histogram[orig_label].clear()
-                    
-                    # 3. Force instant expiration so it doesn't enter the GHOST state at all
-                    if orig_label in self.hands_tracker:
-                        self.hands_tracker[orig_label] = self.MAX_GHOST_TTL + 1
-                        
-                detections[i] = (new_label, wrist_px, lm_set)
+                    self._log('CORE', f"ZERO-TRUST OVERRIDE: Forced MediaPipe's {orig_label} to become {new_label}", True)
+                valid_detections.append((new_label, wrist_px, lm_set))
+                
+        detections[:] = valid_detections
 
     def generate_frames(self, velocity, label):
         hist = self.position_histogram[label]
