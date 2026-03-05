@@ -167,15 +167,30 @@ def main():
         for label in ("LEFT", "RIGHT"):
             pts_left = safe_get_position_pts_from_ar_data(ar_data, label)
             frame_type = ar_data.get('FRAME_TYPE', {}).get(label, "REAL")
-            # ghost tint if ghost
-            draw_points(left_surf, pts_left, COLOR_LEFT, radius=3)
-            draw_connections(left_surf, pts_left, CONN_COLOR, width=2)
+            
+            # --- DEBUG MODE VISUALS ---
+            if frame_type == "GHOST":
+                # AI took over: Neon Green Matrix vibe
+                pt_color = (0, 255, 0)       
+                conn_color = (50, 200, 50)   
+                wrist_color = (255, 255, 0)  # Yellow wrist to show the Optical Flow anchor
+            else:
+                # MediaPipe is driving: Standard colors
+                pt_color = COLOR_LEFT
+                conn_color = CONN_COLOR
+                wrist_color = COLOR_WRIST_MARK
+
+            # Draw the hand with the dynamic colors
+            draw_points(left_surf, pts_left, pt_color, radius=3)
+            draw_connections(left_surf, pts_left, conn_color, width=2)
+            
             # wrist marker (index 0)
             try:
                 if len(pts_left) > 0 and pts_left[0]:
-                    pygame.draw.circle(left_surf, COLOR_WRIST_MARK, pts_left[0], 6)
+                    pygame.draw.circle(left_surf, wrist_color, pts_left[0], 6)
             except Exception:
                 pass
+                
             # small per-hand label and indicator
             try:
                 y_off = 18 if label == "LEFT" else 36

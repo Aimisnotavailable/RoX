@@ -79,7 +79,7 @@ class AR:
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(
             max_num_hands=2,
-            min_detection_confidence=0.2
+            min_detection_confidence=0.6
         )
 
         self.position_histogram = {'LEFT': [], 'RIGHT': []}
@@ -358,38 +358,57 @@ class AR:
         if not detections:
             return
 
+        # 1. BLOB CREATION: Structure raw MediaPipe data into a trackable blob.
+        # We explicitly preserve d[0] (MediaPipe's original label guess) so the Bouncer 
+        # can debate with the AI rather than just blindly trusting physical distance.
         blobs = [(i, d[0], d[1], d[2]) for i, d in enumerate(detections) if d[1] is not None]
         if not blobs:
             return
 
+        # Fetch the last known *real* physical coordinates of both hands (ignoring ghosts)
         tracked = {
             "LEFT": self._last_real_wrist("LEFT"),
             "RIGHT": self._last_real_wrist("RIGHT")
         }
 
+        # THE BLAST RADIUS: A dead hand only "owns" a tight 10% radius around its last known pixel.
+        # This prevents a hand from stealing an identity from across the screen.
         MAX_JUMP = max(self.W, self.H) * 0.10 
         assigned_blobs = set()
         assigned_labels = set()
         final_assignments = {}
 
+        # 2. THE BOUNCER (Temporal Freshness & Label Penalties)
         pairs = []
         for b_idx, orig_label, wrist_px, _ in blobs:
             for label, last_pos in tracked.items():
                 if last_pos is not None:
+                    # Calculate pure physical distance between the new hand and the historical track
                     dist = math.hypot(wrist_px[0] - last_pos[0], wrist_px[1] - last_pos[1])
                     
+                    # Apply penalty if the AI's label disagrees with our Kinematic History
                     if orig_label != label:
                         track_length = len(self.position_histogram[label])
                         frames_absent = self.hands_tracker[label]
                         
+                        # WEAK OR STALE MEMORY:
+                        # If the hand has been missing for >2 frames, or tracking history is <5 frames,
+                        # MediaPipe is likely correcting a first-frame hallucination.
+                        # We apply a massive 200% penalty to force the Bouncer to back off and let MediaPipe win.
                         if frames_absent > 2 or track_length < 5:
                             dist += (MAX_JUMP * 2.0)
+                        
+                        # STRONG, FRESH MEMORY:
+                        # The hand is actively on screen. MediaPipe is likely flickering mid-air.
+                        # Apply a standard 60% penalty. The Bouncer will protect the state and override MediaPipe.
                         else:
                             dist += (MAX_JUMP * 0.6)
 
+                    # Only consider it a match if the final penalized distance is within the blast radius
                     if dist < MAX_JUMP:
                         pairs.append((dist, b_idx, label))
         
+        # Sort by lowest penalized distance to assign the most confident matches first
         pairs.sort(key=lambda x: x[0])
         for dist, b_idx, label in pairs:
             if b_idx not in assigned_blobs and label not in assigned_labels:
@@ -399,22 +418,24 @@ class AR:
 
         unassigned_blobs = [b for b in blobs if b[0] not in assigned_blobs]
         
-        # --- THE DOUBLE-BOX HALLUCINATION FIX ---
-        # MediaPipe sometimes draws two overlapping bounding boxes on one physical hand.
-        # We must filter out any unassigned blob that is physically touching an already verified hand.
+        # 3. THE DOUBLE-BOX HALLUCINATION FIX
+        # MediaPipe occasionally draws two overlapping bounding boxes on one single physical hand.
+        # We must filter out any unassigned blob that is physically touching an already verified hand
+        # so Optical Flow doesn't lock onto the duplicate and spawn a permanent ghost.
         filtered_unassigned = []
         for b in unassigned_blobs:
             b_idx, orig_label, wrist_px, _ = b
             is_dup = False
             
-            # Check against finalized tracks
+            # Check proximity against already finalized hand tracks
             for a_idx, a_label in final_assignments.items():
                 a_wrist = detections[a_idx][1]
+                # If it's within 5% of the screen to an existing hand, it's anatomically impossible. Drop it.
                 if math.hypot(wrist_px[0] - a_wrist[0], wrist_px[1] - a_wrist[1]) < (MAX_JUMP * 0.5):
                     is_dup = True
                     break
             
-            # Check against other valid unassigned blobs
+            # Check proximity against other unassigned blobs (in case both duplicates were unassigned)
             if not is_dup:
                 for a in filtered_unassigned:
                     a_wrist = a[2]
@@ -429,31 +450,40 @@ class AR:
                 
         unassigned_blobs = filtered_unassigned
 
-        # Hierarchy of Trust
+        # 4. HIERARCHY OF TRUST (Fallback Logic)
+        # Scenario A: Both hands appear simultaneously with zero history.
         if len(unassigned_blobs) == 2 and len(assigned_labels) == 0:
             label_0 = unassigned_blobs[0][1] 
             label_1 = unassigned_blobs[1][1]
             
+            # Trust MediaPipe natively if it correctly output one LEFT and one RIGHT
             if label_0 != label_1 and label_0 in ["LEFT", "RIGHT"] and label_1 in ["LEFT", "RIGHT"]:
                 final_assignments[unassigned_blobs[0][0]] = label_0
                 final_assignments[unassigned_blobs[1][0]] = label_1
                 assigned_labels.update([label_0, label_1])
             else:
+                # Emergency Parachute: MediaPipe failed (e.g., output two RIGHTs). 
+                # Fallback to Spatial Partitioning (Left side of screen = LEFT hand)
                 self._log('CORE', "MediaPipe duplicate labels detected. Falling back to Spatial Partitioning.", True)
-                unassigned_blobs.sort(key=lambda b: b[2][0]) 
+                unassigned_blobs.sort(key=lambda b: b[2][0]) # Sort by X coordinate
                 final_assignments[unassigned_blobs[0][0]] = "LEFT"
                 final_assignments[unassigned_blobs[1][0]] = "RIGHT"
                 assigned_labels.update(["LEFT", "RIGHT"])
+                
+        # Scenario B: Only one unassigned hand remains
         else:
             for b_idx, orig_label, wrist_px, _ in unassigned_blobs:
                 avail_labels = [L for L in ["LEFT", "RIGHT"] if L not in assigned_labels]
                 if not avail_labels:
                     break 
                 
+                # Trust MediaPipe's original label if that slot is currently empty
                 if orig_label in avail_labels:
                     label = orig_label
+                # If MediaPipe's label is taken, but there's only one slot left, take the remaining slot
                 elif len(avail_labels) == 1:
                     label = avail_labels[0]
+                # Absolute last resort fallback
                 else:
                     label = "LEFT" if wrist_px[0] < self.W / 2 else "RIGHT"
                 
@@ -461,7 +491,9 @@ class AR:
                 assigned_labels.add(label)
                 assigned_blobs.add(b_idx)
 
-        # Mutate detections in place to completely erase the dropped duplicates
+        # 5. EXECUTE THE ASSIGNMENTS
+        # Mutate detections in-place to apply the overridden labels, 
+        # which completely erases the dropped hallucinated duplicates.
         valid_detections = []
         for i, (orig_label, wrist_px, lm_set) in enumerate(detections):
             if i in final_assignments:
