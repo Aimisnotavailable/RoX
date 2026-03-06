@@ -5,9 +5,10 @@ import math
 import time
 
 from src.arinput import ARInputHandler 
-from scripts.config import *
+from scripts.arconfig import *
+from src.configs.engineconfig import *
 from scripts.ar import AR
-from src.camera import Camera2D
+from src.camera.camera import Camera2D
 
 class BlockWorld:
     def __init__(self, grid_size=32):

@@ -1,6 +1,7 @@
 # src/arinput.py
 import time
-from scripts.config import *
+from scripts.arconfig import *
+from src.configs.arinputconfig import *
 from src.handstateaction import HandActionState
 
 class ARInputHandler:

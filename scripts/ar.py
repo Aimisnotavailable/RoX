@@ -1,5 +1,5 @@
 # scripts/ar.py
-from scripts.config import *
+from scripts.arconfig import *
 import math
 import cv2
 import pygame

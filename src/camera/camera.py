@@ -1,4 +1,5 @@
-from scripts.config import *
+from src.configs.cameraconfig import *
+from src.camera.frustum import Frustum
 from abc import ABC, abstractmethod
 
 class Camera2D:
@@ -34,6 +35,7 @@ class Camera3D(ABC):
 
     def __init__(self, type="FPS"):
         self.type = type
+        self.frustum = Frustum(self)
 
     @abstractmethod
     def update_camera_vectors(self):

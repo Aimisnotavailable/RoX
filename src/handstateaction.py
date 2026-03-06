@@ -1,5 +1,5 @@
 # src/handstateaction.py
-from scripts.config import PINCH_STABLE_TIME
+from src.configs.arinputconfig import PINCH_STABLE_TIME
 
 class HandActionState:
     """

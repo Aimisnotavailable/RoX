@@ -1,4 +1,4 @@
-from scripts.config import *
+from scripts.arconfig import WIDTH, HEIGHT
 from scripts.ar import *
 from src.engine2d import GraphicsEngine2D
 from src.engine3d import GraphicsEngine3D

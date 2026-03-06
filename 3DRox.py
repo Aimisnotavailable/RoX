@@ -1,4 +1,4 @@
-from scripts.config import *
+from src.configs.engineconfig import *
 from rox import RoX
 
 class RoX3D(RoX):

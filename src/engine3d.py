@@ -1,5 +1,5 @@
-from scripts.config import *
-from src.camera import FPSCamera, RTSCamera
+from src.configs.engineconfig import *
+from src.camera.camera import FPSCamera, RTSCamera
 from src.mesh import CubeMesh
 from src.builder import VoxelBuilder
 from src.quad import ScreenQuad
