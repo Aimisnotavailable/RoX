@@ -22,7 +22,7 @@ class ScreenQuad:
         vertices = np.array(vertices, dtype='f4')
         self.vbo = self.ctx.buffer(vertices.tobytes())
         
-        self.program = self.app.load_program('shaders/quad')
+        self.program = self.app.resources.load_program('shaders/quad')
         
         # Only position (2f) and texcoord (2f)
         content = [(self.vbo, '2f 2f', 'in_position', 'in_texcoord')]

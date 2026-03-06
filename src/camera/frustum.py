@@ -1,5 +1,4 @@
-from settings import *
-
+from src.configs.cameraconfig import *
 
 class Frustum:
     def __init__(self, camera):
