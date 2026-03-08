@@ -6,6 +6,8 @@ from shader_program import ShaderProgram
 from scene import Scene
 from player import Player
 from textures import Textures
+from arcontroller import ARController
+from hud import HUD
 
 
 class VoxelEngine:
@@ -39,10 +41,17 @@ class VoxelEngine:
         self.shader_program = ShaderProgram(self)
         self.scene = Scene(self)
 
+        # --- INITIALIZE AR & HUD ---
+        self.ar_controller = ARController(self)
+        
     def update(self):
         self.player.update()
         self.shader_program.update()
         self.scene.update()
+        
+        # --- UPDATE AR ---
+        if hasattr(self, 'ar_controller'):
+            self.ar_controller.update()
 
         self.delta_time = self.clock.tick()
         self.time = pg.time.get_ticks() * 0.001
@@ -51,6 +60,7 @@ class VoxelEngine:
     def render(self):
         self.ctx.clear(color=BG_COLOR)
         self.scene.render()
+                    
         pg.display.flip()
 
     def handle_events(self):

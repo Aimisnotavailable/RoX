@@ -16,7 +16,6 @@ class ChunkMesh(BaseMesh):
         self.vao = self.get_vao()
 
     def rebuild(self):
-        print("Rebuilding chunk mesh at position:", self.chunk.position)
         self.vao = self.get_vao()
 
     def get_vertex_data(self):

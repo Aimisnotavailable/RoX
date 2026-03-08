@@ -23,17 +23,30 @@ class VoxelHandler:
         
         # --- Smart Drag-to-Build State ---
         self.is_dragging = False
-        self.snap_normal = None    # The 3D axis we lock onto (e.g., (1, 0, 0))
-        self.exact_pos = None      # The float position during the drag
-        self.place_pos = None      # The snapped integer position
-        self.sensitivity = 0.05    # Adjust to make mouse dragging faster/slower
+        self.snap_normal = None    
+        self.exact_pos = None      
+        self.place_pos = None      
+        self.sensitivity = 0.05    
+
+        # --- FPS Continuous Action State ---
+        self.action_timer = 0.0
+        self.action_delay = 100.0  # Delay in milliseconds between block actions when holding click
+
+        get_logger_info('ENGINE', 'VoxelHandler initialized successfully.')
 
     # ==========================================
     # --- CORE UPDATE LOOP ---
     # ==========================================
     
     def update(self):
-        self.handle_input()
+        # Tick the cooldown timer down
+        self.action_timer = max(0.0, self.action_timer - self.engine.delta_time)
+
+        # Handle mouse input based on camera mode
+        if self.engine.player.mode == "FPS":
+            self.handle_fps_input()
+        elif self.engine.player.mode == "RTS":
+            self.handle_rts_input()
         
         # Only shoot the raycast if we aren't currently dragging a line of blocks
         if not self.is_dragging:
@@ -45,53 +58,83 @@ class VoxelHandler:
 
 
     # ==========================================
-    # --- SMART DRAG-TO-BUILD LOGIC ---
+    # --- INPUT HANDLING ---
     # ==========================================
 
-    def handle_input(self):
-        # We only enable drag-to-build in RTS mode while trying to ADD blocks
-        if self.engine.player.mode != "RTS" or self.interaction_mode != 1:
-            self.is_dragging = False
-            return
-
+    def handle_fps_input(self):
         mouse_pressed = pg.mouse.get_pressed()[0] # Left click
         
-        # Fetch mouse movement.
-        rel_x, rel_y = pg.mouse.get_rel()
+        # Continuous click action with delay
+        if mouse_pressed and self.action_timer <= 0.0:
+            if self.interaction_mode == 1:
+                self.add_voxel()
+            else:
+                self.remove_voxel()
+                
+            # Reset timer
+            self.action_timer = self.action_delay
+
+    def handle_rts_input(self):
+        mouse_pressed = pg.mouse.get_pressed()[0]
+        
+        # Override with AR gesture click
+        if hasattr(self.engine, 'ar_right_click') and self.engine.ar_right_click:
+            mouse_pressed = True
+
+        # Override relative movement with AR cursor
+        if hasattr(self.engine, 'ar_mouse_pos'):
+            curr_pos = self.engine.ar_mouse_pos
+            if not hasattr(self, 'last_ar_pos'): self.last_ar_pos = curr_pos
+            rel_x = curr_pos[0] - self.last_ar_pos[0]
+            rel_y = curr_pos[1] - self.last_ar_pos[1]
+            self.last_ar_pos = curr_pos
+        else:
+            rel_x, rel_y = pg.mouse.get_rel()
+            
         mouse_delta = glm.vec2(rel_x, rel_y)
 
-        # 1. START DRAG: Just clicked on a block face
+        # 1. START DRAG
         if mouse_pressed and not self.is_dragging:
             if self.voxel_id and self.voxel_normal: 
                 self.is_dragging = True
                 self.snap_normal = glm.vec3(self.voxel_normal)
                 
-                # Start building exactly one block OUT from the face we clicked
-                self.exact_pos = glm.vec3(self.voxel_world_pos) + self.snap_normal
+                # If ADDING, start at the empty block face. If REMOVING, start inside the block itself!
+                if self.interaction_mode == 1:
+                    self.exact_pos = glm.vec3(self.voxel_world_pos) + self.snap_normal
+                else:
+                    self.exact_pos = glm.vec3(self.voxel_world_pos)
+                    
                 self.place_pos = glm.vec3(self.exact_pos)
                 
-                # Instantly place the first block
-                self._place_block_at(self.place_pos)
+                get_logger_info('DEBUG', f'Started Drag Action along axis: {tuple(self.snap_normal)}')
+                
+                # Instantly apply the first block action
+                if self.interaction_mode == 1:
+                    self._place_block_at(self.place_pos)
+                else:
+                    self._remove_block_at(self.place_pos)
 
-        # 2. DURING DRAG: Holding the button and moving the mouse
+        # 2. DURING DRAG
         elif mouse_pressed and self.is_dragging:
             if self.snap_normal is not None:
                 screen_dir = self.get_screen_axis_direction()
                 pixel_movement = glm.dot(mouse_delta, screen_dir)
                 
-                # Move our exact float position
                 self.exact_pos += self.snap_normal * (pixel_movement * self.sensitivity)
-
-                # Snap to integer grid block
                 snapped = glm.round(self.exact_pos)
                 
-                # If snapped position moved to a new block coordinate, place it!
                 if snapped != self.place_pos:
                     self.place_pos = snapped
-                    self._place_block_at(self.place_pos)
+                    # Apply action to the new coordinate
+                    if self.interaction_mode == 1:
+                        self._place_block_at(self.place_pos)
+                    else:
+                        self._remove_block_at(self.place_pos)
 
-        # 3. END DRAG: Released the mouse
+        # 3. END DRAG
         elif not mouse_pressed and self.is_dragging:
+            get_logger_info('DEBUG', 'Ended Drag Action.')
             self.is_dragging = False
             self.snap_normal = None
             self.exact_pos = None
@@ -129,7 +172,11 @@ class VoxelHandler:
     
     def get_rts_ray(self, screen_pos=None):
         if screen_pos is None:
-            _x, _y = pg.mouse.get_pos()
+            # Inject AR Virtual Cursor Position
+            if hasattr(self.engine, 'ar_mouse_pos'):
+                _x, _y = self.engine.ar_mouse_pos
+            else:
+                _x, _y = pg.mouse.get_pos()
         else:
             _x, _y = screen_pos
             
@@ -224,17 +271,17 @@ class VoxelHandler:
     # ==========================================
 
     def set_voxel(self):
-        if self.engine.player.mode == "RTS" and self.interaction_mode == 1:
-            return 
-            
-        if self.interaction_mode:
-            self.add_voxel()
-        else:
-            self.remove_voxel()
+        # We now handle left-clicks internally via update() & handle_fps_input()! 
+        # Kept this function empty so player.py doesn't crash if it tries to call it.
+        pass 
 
     def add_voxel(self):
         if self.voxel_id:
             self._place_block_at(self.voxel_world_pos + self.voxel_normal)
+
+    def remove_voxel(self):
+        if self.voxel_id:
+            self._remove_block_at(self.voxel_world_pos)
 
     def _place_block_at(self, pos):
         """Universal helper to safely inject a block at a coordinate and rebuild meshes."""
@@ -242,7 +289,6 @@ class VoxelHandler:
         if not result[0]: # If space is empty
             _, voxel_index, voxel_local_pos, chunk = result
             if chunk is not None:
-                # 100% Guaranteed Integer Index
                 safe_index = int(voxel_index)
                 
                 chunk.voxels[safe_index] = self.new_voxel_id
@@ -250,23 +296,33 @@ class VoxelHandler:
                 if chunk.is_empty:
                     chunk.is_empty = False
                 
+                sanitized_pos = (int(math.floor(pos[0])), int(math.floor(pos[1])), int(math.floor(pos[2])))
+                get_logger_info('DEBUG', f'Placed block [ID: {self.new_voxel_id}] at {sanitized_pos}')
+
                 self._rebuild_adj_for_pos(voxel_local_pos, pos)
 
-    def remove_voxel(self):
-        if self.voxel_id:
-            # 100% Guaranteed Integer Index
-            safe_index = int(self.voxel_index)
-            
-            self.chunk.voxels[safe_index] = 0
-            self.chunk.mesh.rebuild()
-            self._rebuild_adj_for_pos(self.voxel_local_pos, self.voxel_world_pos)
+    def _remove_block_at(self, pos):
+        """Universal helper to safely remove a block at a coordinate."""
+        result = self.get_voxel_id(pos)
+        if result[0]: # If a block actually exists here
+            _, voxel_index, voxel_local_pos, chunk = result
+            if chunk is not None:
+                safe_index = int(voxel_index)
+                
+                chunk.voxels[safe_index] = 0
+                chunk.mesh.rebuild()
+                
+                sanitized_pos = (int(math.floor(pos[0])), int(math.floor(pos[1])), int(math.floor(pos[2])))
+                get_logger_info('DEBUG', f'Removed block at {sanitized_pos}')
+
+                self._rebuild_adj_for_pos(voxel_local_pos, pos)
 
     def switch_mode(self):
         self.interaction_mode = not self.interaction_mode
+        mode_str = "ADD" if self.interaction_mode else "REMOVE"
+        get_logger_info('GAME', f'Interaction Mode switched to: {mode_str}')
 
     def _rebuild_adj_for_pos(self, local_pos, world_pos):
-        """Checks if a modification touched a chunk border and rebuilds neighbors."""
-        # Sanitize floats out of unpacking
         lx, ly, lz = int(math.floor(local_pos[0])), int(math.floor(local_pos[1])), int(math.floor(local_pos[2]))
         wx, wy, wz = int(math.floor(world_pos[0])), int(math.floor(world_pos[1])), int(math.floor(world_pos[2]))
 
@@ -280,39 +336,30 @@ class VoxelHandler:
         elif lz == CHUNK_SIZE - 1: self.rebuild_adj_chunk((wx, wy, wz + 1))
 
     def rebuild_adj_chunk(self, adj_voxel_pos):
-        # Convert tuple back to pure int
         sanitized_pos = (int(adj_voxel_pos[0]), int(adj_voxel_pos[1]), int(adj_voxel_pos[2]))
         index = int(get_chunk_index(sanitized_pos))
         if index != -1:
             self.chunks[index].mesh.rebuild()
 
     def get_voxel_id(self, voxel_world_pos):
-        # --- THE INTEGER FIREWALL ---
-        # Safely extract and floor the incoming world position coordinates
         wx = int(math.floor(voxel_world_pos[0]))
         wy = int(math.floor(voxel_world_pos[1]))
         wz = int(math.floor(voxel_world_pos[2]))
         
-        # Pure integer division for chunks
         cx, cy, cz = wx // CHUNK_SIZE, wy // CHUNK_SIZE, wz // CHUNK_SIZE
 
         if 0 <= cx < WORLD_W and 0 <= cy < WORLD_H and 0 <= cz < WORLD_D:
-            # Calculate integer chunk index
             chunk_index = int(cx + WORLD_W * cz + WORLD_AREA * cy)
             chunk = self.chunks[chunk_index]
             
             if chunk is not None:
-                # Calculate strictly integer local positions
                 lx = int(wx - cx * CHUNK_SIZE)
                 ly = int(wy - cy * CHUNK_SIZE)
                 lz = int(wz - cz * CHUNK_SIZE)
                 
-                # Calculate integer voxel array index
                 voxel_index = int(lx + CHUNK_SIZE * lz + CHUNK_AREA * ly)
-                
                 voxel_id = chunk.voxels[voxel_index]
                 
-                # Return guaranteed pure int values/tuples
                 return voxel_id, voxel_index, (lx, ly, lz), chunk
                 
         return 0, 0, (0, 0, 0), None

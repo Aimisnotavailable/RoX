@@ -37,9 +37,18 @@ class World:
 
     def update(self):
         if not self.new_world:
-            player_pos = self.engine.player.position
-            x, y, z = (int(player_pos[0] // CHUNK_SIZE), int(player_pos[1] // CHUNK_SIZE), int(player_pos[2] // CHUNK_SIZE))
+            # --- THE INVERSE MATRIX TRICK ---
+            # Transform the camera's global position into the chunk grid's local space
+            inv_model = glm.inverse(self.m_model)
+            local_player_pos = inv_model * glm.vec4(self.engine.player.position, 1.0)
+            
+            # Now calculate the chunk coordinates based on this local position
+            x = int(local_player_pos.x // CHUNK_SIZE)
+            y = int(local_player_pos.y // CHUNK_SIZE)
+            z = int(local_player_pos.z // CHUNK_SIZE)
+            
             self.load_visible_chunks(x, y, z)
+            
         self.voxel_handler.update()
     
     def load_visible_chunks(self, center_x, center_y, center_z):

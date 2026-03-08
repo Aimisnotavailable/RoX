@@ -7,14 +7,18 @@ class VoxelMarker:
         self.engine = voxel_handler.engine
         self.handler = voxel_handler
         self.position = glm.vec3(0)
-        self.m_model = self.get_model_matrix()
         self.mesh = CubeMesh(self.engine)
 
     def update(self):
-        if self.handler.voxel_id:
-            if self.handler.interaction_mode:
+        # 1. If we are actively dragging a line of blocks, follow the drag cursor!
+        if self.handler.is_dragging and self.handler.place_pos is not None:
+            self.position = self.handler.place_pos
+            
+        # 2. Otherwise, if we are just hovering, follow the normal raycast
+        elif self.handler.voxel_id:
+            if self.handler.interaction_mode == 1: # ADD mode (hovering next to block)
                 self.position = self.handler.voxel_world_pos + self.handler.voxel_normal
-            else:
+            else: # REMOVE mode (hovering inside block)
                 self.position = self.handler.voxel_world_pos
 
     def set_uniform(self):
@@ -22,16 +26,19 @@ class VoxelMarker:
         
         # Calculate local marker position
         local_model = glm.translate(glm.mat4(), glm.vec3(self.position))
-        # Multiply by the spinning world matrix (assuming voxel_handler has self.world = world)
+        
+        # Multiply by the spinning world matrix 
         final_model = self.engine.scene.world.m_model * local_model
         
         self.mesh.program['m_model'].write(final_model)
 
     def get_model_matrix(self):
+        # Fallback method in case anything else calls it
         m_model = glm.translate(glm.mat4(), glm.vec3(self.position))
         return m_model
 
     def render(self):
-        if self.handler.voxel_id:
+        # Render if we are hovering over a block OR actively dragging
+        if self.handler.voxel_id or self.handler.is_dragging:
             self.set_uniform()
             self.mesh.render()

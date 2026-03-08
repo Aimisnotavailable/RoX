@@ -11,6 +11,7 @@ class ShaderProgram:
         self.voxel_marker = self.get_program(shader_name='voxel_marker')
         self.water = self.get_program('water')
         self.clouds = self.get_program('clouds')
+        self.hud = self.get_program('hud')
         # ------------------------- #
         self.set_uniforms_on_init()
 
@@ -38,6 +39,9 @@ class ShaderProgram:
         self.clouds['center'] = CENTER_XZ
         self.clouds['bg_color'].write(BG_COLOR)
         self.clouds['cloud_scale'] = CLOUD_SCALE
+
+        # HUD
+        self.hud['tex'] = 0
 
     def update(self):
         self.chunk['m_view'].write(self.player.m_view)

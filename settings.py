@@ -5,6 +5,8 @@ import math
 import json
 import pygame
 from pathlib import Path
+from scripts.logger import get_logger_info
+
 RENDER_DISTANCE = 8
 
 # File format
