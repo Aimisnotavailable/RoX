@@ -2,6 +2,8 @@ import pygame as pg
 import moderngl as mgl
 import numpy as np
 from settings import *
+from scripts.arconfig import *
+from mediapipe.python.solutions.hands import HAND_CONNECTIONS
 
 class HUD:
     def __init__(self, engine):
@@ -20,7 +22,6 @@ class HUD:
         
         self.texture = self.ctx.texture(self.res, 4)
         self.texture.filter = (mgl.NEAREST, mgl.NEAREST)
-        self.texture.swizzle = 'BGRA'
         
         # Fullscreen quad vertices
         vertices = np.array([
@@ -34,6 +35,54 @@ class HUD:
         
         self.vbo = self.ctx.buffer(vertices)
         self.vao = self.ctx.vertex_array(self.program, [(self.vbo, '2f 2f', 'in_position', 'in_texcoord')])
+
+    def render_feed_to_texture(self, surf, fit_to_screen=False):
+        img = self.engine.ar_controller.ar_system.image
+        if img is not None:
+            image = img
+            if fit_to_screen:
+                image = pygame.transform.scale(img, WIN_RES)
+            surf.blit(image, (0, 0) if fit_to_screen else (WIN_RES[0] - image.get_width(), 0))
+
+    def render_hands(self, surf):
+        hand_pts  = self.engine.ar_controller.ar_data['POSITION_DATA']
+        for label in ("LEFT", "RIGHT"):
+            pts = hand_pts[label]
+            if not pts:
+                continue
+
+            try:
+                max_idx = max(max(c) for c in HAND_CONNECTIONS)
+            except Exception:
+                max_idx = -1
+
+            if len(pts) > max_idx:
+                for a_idx, b_idx in HAND_CONNECTIONS:
+                    if a_idx >= len(pts) or b_idx >= len(pts):
+                        continue
+                    pa = pts[a_idx]
+                    pb = pts[b_idx]
+                    if pa and pb:
+                        try:
+                            pygame.draw.line(surf, (0, 0, 255), (int(pa[0]), int(pa[1])), (int(pb[0]), int(pb[1])), 1)
+                        except Exception:
+                            continue
+
+            for p in pts:
+                if not p:
+                    continue
+                try:
+                    cx = int(round(p[0])); cy = int(round(p[1]))
+                    pygame.draw.circle(surf, (255, 255, 255), (cx, cy), 2)
+                except Exception:
+                    continue
+
+                color = (200, 80, 80) if label == "LEFT" else (80, 80, 200)
+                p = pts[WRIST_IDX] if len(pts) > WRIST_IDX else max_idx
+                pygame.draw.circle(surf, color, p, 10, 2)
+                font = pygame.font.SysFont("Arial", 14)
+                txt = font.render(f"{label}", True, color)
+                surf.blit(txt, (max(0, p[0]-20), max(0, p[1]-30)))
 
     def update_surface(self):
         self.surface.fill((0, 0, 0, 0)) # Clear transparent
@@ -55,7 +104,8 @@ class HUD:
         self.surface.blit(self.font.render(fps_text, True, (255, 255, 255)), (25, 60))
         self.surface.blit(self.font.render(f"AR:  {ar_state}", True, (255, 255, 255)), (25, 110))
         self.surface.blit(self.font.render(f"ACT: {action}", True, (255, 255, 0)), (25, 135))
-        
+        self.render_feed_to_texture(self.surface)
+        self.render_hands(self.surface)
         # Draw AR Hand Cursors dynamically on screen!
         if hasattr(self.engine, 'ar_controller'):
             ctrl = self.engine.ar_controller

@@ -9,7 +9,7 @@ class ARController:
         self.engine = engine
         # Initialize your custom AR system (Mediapipe + Ghost Frames)
         self.ar_system = AR(screen_dim=WIN_RES)
-        self.cap = cv2.VideoCapture(0)
+        self.cap = cv2.VideoCapture("demo\demo.mp4")
         
         # --- Smoothing (EMA) Logic ---
         # 0.3 means 30% new data, 70% old data. 
