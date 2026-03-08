@@ -75,21 +75,29 @@ class VoxelHandler:
             self.action_timer = self.action_delay
 
     def handle_rts_input(self):
+        # Base physical mouse state
         mouse_pressed = pg.mouse.get_pressed()[0]
         
-        # Override with AR gesture click
-        if hasattr(self.engine, 'ar_right_click') and self.engine.ar_right_click:
-            mouse_pressed = True
+        # Check if AR is currently active and tracking
+        ar_active = getattr(self.engine, 'ar_mouse_pos', None) is not None
 
-        # Override relative movement with AR cursor
-        if hasattr(self.engine, 'ar_mouse_pos'):
+        if ar_active:
+            # Override click with AR pinch
+            if getattr(self.engine, 'ar_right_click', False):
+                mouse_pressed = True
+
+            # Override relative movement with AR cursor
             curr_pos = self.engine.ar_mouse_pos
-            if not hasattr(self, 'last_ar_pos'): self.last_ar_pos = curr_pos
+            if getattr(self, 'last_ar_pos', None) is None: 
+                self.last_ar_pos = curr_pos
+                
             rel_x = curr_pos[0] - self.last_ar_pos[0]
             rel_y = curr_pos[1] - self.last_ar_pos[1]
             self.last_ar_pos = curr_pos
         else:
+            # Fallback to physical mouse
             rel_x, rel_y = pg.mouse.get_rel()
+            self.last_ar_pos = None # Reset AR history so it doesn't jump when re-detected
             
         mouse_delta = glm.vec2(rel_x, rel_y)
 
@@ -172,8 +180,8 @@ class VoxelHandler:
     
     def get_rts_ray(self, screen_pos=None):
         if screen_pos is None:
-            # Inject AR Virtual Cursor Position
-            if hasattr(self.engine, 'ar_mouse_pos'):
+            # Prioritize AR Virtual Cursor, fallback to physical mouse
+            if getattr(self.engine, 'ar_mouse_pos', None) is not None:
                 _x, _y = self.engine.ar_mouse_pos
             else:
                 _x, _y = pg.mouse.get_pos()

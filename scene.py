@@ -14,8 +14,8 @@ class Scene:
         self.water = Water(engine)
         self.clouds = Clouds(engine)
         
-        # Initialize HUD here instead of main.py
-        self.hud = HUD(engine) 
+        # # Initialize HUD here instead of main.py
+        # self.hud = HUD(engine) 
 
     def update(self):
         self.world.update()
@@ -35,8 +35,8 @@ class Scene:
         # voxel selection
         self.voxel_marker.render()
 
-        # --- HUD RENDERING ---
-        # Disable depth testing so the 2D HUD draws on top of everything
-        self.engine.ctx.disable(mgl.DEPTH_TEST)
-        self.hud.render()
-        self.engine.ctx.enable(mgl.DEPTH_TEST)
+        # # --- HUD RENDERING ---
+        # # Disable depth testing so the 2D HUD draws on top of everything
+        # self.engine.ctx.disable(mgl.DEPTH_TEST)
+        # self.hud.render()
+        # self.engine.ctx.enable(mgl.DEPTH_TEST)

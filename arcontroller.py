@@ -7,15 +7,14 @@ from scripts.ar import AR
 class ARController:
     def __init__(self, engine):
         self.engine = engine
-        # Initialize your custom AR system (Mediapipe + Ghost Frames)
         self.ar_system = AR(screen_dim=WIN_RES)
-        self.cap = cv2.VideoCapture("demo\demo.mp4")
+        self.cap = cv2.VideoCapture(0)
         
-        # --- Smoothing (EMA) Logic ---
-        # 0.3 means 30% new data, 70% old data. 
-        # Lower = smoother but more lag. Higher = raw jitter.
-        self.smooth_alpha = 0.3 
-        self.smoothed_landmarks = {"LEFT": None, "RIGHT": None}
+        # --- Smoothing Logic ---
+        # Because we are now smoothing in the FAST engine loop, 
+        # this alpha needs to be much lower (e.g., 0.05 to 0.1)
+        self.smooth_alpha = 0.1 
+        self.current_lms = {"LEFT": None, "RIGHT": None} # Tracks the display position
         
         # Shared data
         self.is_running = True
@@ -23,89 +22,74 @@ class ARController:
         self.ar_data = None 
         self.frame = None
 
-        # State tracking for gestures
         self.last_rotate_pos = None
         self.last_zoom_dist = None
         
-        # HUD Helpers
         self.l_pos, self.r_pos = None, None
         self.l_click, self.r_click = False, False
         
-        # Threading setup
         print('[AR] Starting Ghost-Frame Tracking Thread...')
         self.thread = threading.Thread(target=self._ar_loop, daemon=True)
         self.thread.start()
 
-    def _apply_ema(self, label, new_landmarks):
-        """Reduces violent shaking by averaging movement over time."""
-        if not new_landmarks or len(new_landmarks) < 21:
-            self.smoothed_landmarks[label] = None
-            return None
-        
-        # If first time seeing hand, don't smooth
-        if self.smoothed_landmarks[label] is None:
-            self.smoothed_landmarks[label] = new_landmarks
-            return new_landmarks
-
-        prev_lms = self.smoothed_landmarks[label]
-        smoothed = []
-        
-        for i in range(21):
-            # EMA Formula: (New * Alpha) + (Previous * (1 - Alpha))
-            px = (new_landmarks[i][0] * self.smooth_alpha) + (prev_lms[i][0] * (1 - self.smooth_alpha))
-            py = (new_landmarks[i][1] * self.smooth_alpha) + (prev_lms[i][1] * (1 - self.smooth_alpha))
-            smoothed.append((px, py))
-            
-        self.smoothed_landmarks[label] = smoothed
-        return smoothed
-
     def _ar_loop(self):
-        """Threaded camera processing loop."""
+        """Threaded camera processing loop (Slow Tick ~30fps)."""
         while self.is_running:
             success, frame = self.cap.read()
             if not success: continue
             
-            # Flip for mirror effect
             frame = cv2.flip(frame, 1)
             self.frame = frame 
             
-            # Update the AR Ghost-Frame system
-            # This returns the raw dict with POSITION_DATA, CLICK_FLAG, etc.
-            raw_data = self.ar_system.update(frame)
-            
-            # Apply EMA smoothing to the landmarks to stop the shaking
-            for label in ["LEFT", "RIGHT"]:
-                raw_lms = raw_data["POSITION_DATA"][label]
-                raw_data["POSITION_DATA"][label] = self._apply_ema(label, raw_lms)
-            
-            self.ar_data = raw_data
+            # Just dump the RAW target data. Do NOT smooth here.
+            self.ar_data = self.ar_system.update(frame)
 
     def update(self):
-        """Main Engine Update: Translates Hand Data into Voxel Actions."""
+        """Main Engine Update (Fast Tick ~60+fps): Smooths towards target data."""
         if not self.ar_data: 
             return
         
         data = self.ar_data
         self.current_action_label = "IDLE"
 
-        # 1. Extract Hand positions (using Index Tip - Landmark 8)
-        # We use the smoothed landmarks for steady control
-        l_lms = data["POSITION_DATA"]["LEFT"]
-        r_lms = data["POSITION_DATA"]["RIGHT"]
+        # 1. Smooth interpolation in the FAST engine loop
+        for label in ["LEFT", "RIGHT"]:
+            target_lms = data["POSITION_DATA"][label]
+            
+            # If no hand is detected, drop the current tracking
+            if not target_lms or len(target_lms) < 21:
+                self.current_lms[label] = None
+                continue
+
+            # First time seeing the hand, snap to it
+            if self.current_lms[label] is None:
+                self.current_lms[label] = target_lms
+            else:
+                # Interpolate (Lerp) towards the target position every fast frame
+                smoothed = []
+                for i in range(21):
+                    px = self.current_lms[label][i][0] + (target_lms[i][0] - self.current_lms[label][i][0]) * self.smooth_alpha
+                    py = self.current_lms[label][i][1] + (target_lms[i][1] - self.current_lms[label][i][1]) * self.smooth_alpha
+                    smoothed.append((px, py))
+                self.current_lms[label] = smoothed
+
+        l_lms = self.current_lms["LEFT"]
+        r_lms = self.current_lms["RIGHT"]
         
         self.l_click = data["CLICK_FLAG"]["LEFT"]
         self.r_click = data["CLICK_FLAG"]["RIGHT"]
         
-        # Get coordinates for the HUD cursor / Voxel interaction
         self.l_pos = l_lms[8] if l_lms else None
         self.r_pos = r_lms[8] if r_lms else None
 
-        # --- Update Engine Interface ---
-        # Map right hand to the mouse for building
-        self.engine.ar_right_click = self.r_click
+        # --- Update Engine Interface (INPUT FALLBACK LOGIC) ---
         if self.r_pos:
-            # Scale normalized 0.0-1.0 back to screen pixels for the raycaster
+            self.engine.ar_right_click = self.r_click
             self.engine.ar_mouse_pos = (self.r_pos[0] * WIN_RES[0], self.r_pos[1] * WIN_RES[1])
+        else:
+            # Explicitly turn off AR inputs if right hand is not visible
+            self.engine.ar_right_click = False
+            self.engine.ar_mouse_pos = None
 
         # --- GESTURE LOGIC ---
 

@@ -13,7 +13,6 @@ class VoxelMarker:
         # 1. If we are actively dragging a line of blocks, follow the drag cursor!
         if self.handler.is_dragging and self.handler.place_pos is not None:
             self.position = self.handler.place_pos
-            
         # 2. Otherwise, if we are just hovering, follow the normal raycast
         elif self.handler.voxel_id:
             if self.handler.interaction_mode == 1: # ADD mode (hovering next to block)
@@ -30,7 +29,8 @@ class VoxelMarker:
         # Multiply by the spinning world matrix 
         final_model = self.engine.scene.world.m_model * local_model
         
-        self.mesh.program['m_model'].write(final_model)
+        # --- FIX: Convert PyGLM matrix to bytes ---
+        self.mesh.program['m_model'].write(final_model.to_bytes())
 
     def get_model_matrix(self):
         # Fallback method in case anything else calls it
