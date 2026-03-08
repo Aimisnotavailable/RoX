@@ -9,3 +9,5 @@ moderngl
 pyglm
 Pillow
 imageio
+numba
+opensimplex

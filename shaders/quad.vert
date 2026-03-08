@@ -1,10 +1,16 @@
 #version 330 core
-layout (location = 0) in vec2 in_position;
-layout (location = 1) in vec2 in_texcoord;
 
-out vec2 v_texcoord;
+layout (location = 0) in vec3 in_position;
+layout (location = 1) in vec3 in_color;
+
+uniform mat4 m_proj;
+uniform mat4 m_view;
+uniform mat4 m_model;
+
+out vec3 color;
+
 
 void main() {
-    v_texcoord = in_texcoord;
-    gl_Position = vec4(in_position, 0.0, 1.0);
+    color = in_color;
+    gl_Position = m_proj * m_view * m_model * vec4(in_position, 1.0);
 }
