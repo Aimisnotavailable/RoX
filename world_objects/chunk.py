@@ -22,7 +22,12 @@ class Chunk:
         return m_model
 
     def set_uniform(self):
-        self.mesh.program['m_model'].write(self.m_model)
+        # Calculate local chunk position
+        local_model = glm.translate(glm.mat4(), glm.vec3(self.position) * CHUNK_SIZE)
+        # Multiply by the spinning world matrix
+        final_model = self.world.m_model * local_model
+        
+        self.mesh.program['m_model'].write(final_model)
 
     def build_mesh(self):
         self.mesh = ChunkMesh(self)

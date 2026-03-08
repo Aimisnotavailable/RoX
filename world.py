@@ -16,6 +16,25 @@ class World:
             self.build_chunk_mesh()
         self.voxel_handler = VoxelHandler(self)
 
+        self.world_yaw = 0.0
+        self.world_pitch = 0.0
+        self.world_scale = 1.0 
+
+    @property
+    def m_model(self):
+        m_model = glm.mat4(1.0)
+        center = glm.vec3(WORLD_W * CHUNK_SIZE / 2, WORLD_H * CHUNK_SIZE / 2, WORLD_D * CHUNK_SIZE / 2)
+        
+        m_model = glm.translate(m_model, center)
+        m_model = glm.rotate(m_model, self.world_pitch, glm.vec3(1, 0, 0))
+        m_model = glm.rotate(m_model, self.world_yaw, glm.vec3(0, 1, 0))
+        
+        # Apply the scale right after rotation!
+        m_model = glm.scale(m_model, glm.vec3(self.world_scale))
+        
+        m_model = glm.translate(m_model, -center)
+        return m_model
+
     def update(self):
         if not self.new_world:
             player_pos = self.engine.player.position

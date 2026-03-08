@@ -9,7 +9,7 @@ class Player:
         self.p_speed = PLAYER_SPEED
         
         # Initialize both cameras
-        self.fps_camera = FPSCamera(position, yaw, pitch)
+        self.fps_camera = FPSCamera()
         self.rts_camera = RTSCamera()
         
         # Determine active mode ("FPS" or "RTS")
@@ -81,6 +81,12 @@ class Player:
             
         # Update whichever camera is active
         self.active_camera.update()
+        
+        # --- NEW: UPDATE FRUSTUM ---
+        # Get inverse matrix and scale, then pass them to the active frustum
+        inv_model = glm.inverse(self.engine.scene.world.m_model)
+        scale = self.engine.scene.world.world_scale
+        self.active_camera.frustum.update(inv_model, scale)
 
     def handle_event(self, event):
         # Toggle camera mode
@@ -148,18 +154,24 @@ class Player:
                 self.active_camera.move_up(vel)
             if key_state[pg.K_e]:
                 self.active_camera.move_down(vel)
-                
-        # "Rotate the world" logic for RTS mode using arrow keys
-        if self.mode == "RTS":
-            rotation_speed = 1.5 * self.engine.delta_time
-            if key_state[pg.K_LEFT]:
-                self.active_camera.rotate_yaw(-rotation_speed)
-            if key_state[pg.K_RIGHT]:
-                self.active_camera.rotate_yaw(rotation_speed)
-            if key_state[pg.K_UP]:
-                self.active_camera.rotate_pitch(rotation_speed)
-            if key_state[pg.K_DOWN]:
-                self.active_camera.rotate_pitch(-rotation_speed)
+        
+        scale_speed = 2.0 * self.engine.delta_time * 0.002
+        if key_state[pg.K_x]: 
+            self.engine.scene.world.world_scale += scale_speed
+        if key_state[pg.K_z]: 
+            self.engine.scene.world.world_scale -= scale_speed
+            
+        self.engine.scene.world.world_scale = glm.clamp(self.engine.scene.world.world_scale, 0.1, 5.0)
+
+        rotation_speed = 2.0 * self.engine.delta_time * 0.001
+        if key_state[pg.K_LEFT]: 
+            self.engine.scene.world.world_yaw -= rotation_speed
+        if key_state[pg.K_RIGHT]: 
+            self.engine.scene.world.world_yaw += rotation_speed
+        if key_state[pg.K_UP]: 
+            self.engine.scene.world.world_pitch -= rotation_speed
+        if key_state[pg.K_DOWN]: 
+            self.engine.scene.world.world_pitch += rotation_speed
 
         # Reset speed if no movement keys are pressed
         if not (key_state[pg.K_w] or key_state[pg.K_s] or

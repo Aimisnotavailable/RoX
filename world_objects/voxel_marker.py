@@ -19,7 +19,13 @@ class VoxelMarker:
 
     def set_uniform(self):
         self.mesh.program['mode_id'] = self.handler.interaction_mode
-        self.mesh.program['m_model'].write(self.get_model_matrix())
+        
+        # Calculate local marker position
+        local_model = glm.translate(glm.mat4(), glm.vec3(self.position))
+        # Multiply by the spinning world matrix (assuming voxel_handler has self.world = world)
+        final_model = self.engine.scene.world.m_model * local_model
+        
+        self.mesh.program['m_model'].write(final_model)
 
     def get_model_matrix(self):
         m_model = glm.translate(glm.mat4(), glm.vec3(self.position))

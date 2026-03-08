@@ -102,12 +102,20 @@ class VoxelHandler:
         return self.engine.player.position, ray_direction
         
     def raycast_generic(self, origin, direction, is_rts=False):
-        # 1. Set the maximum distance based on the camera mode
+        # --- THE INVERSE RAY TRICK ---
+        inv_model = glm.inverse(self.engine.scene.world.m_model)
+        
+        # Transform origin (w=1.0 because it's a point in space)
+        local_origin = inv_model * glm.vec4(origin, 1.0)
+        origin = glm.vec3(local_origin)
+        
+        # Transform direction (w=0.0 because it's a direction vector)
+        local_dir = inv_model * glm.vec4(direction, 0.0)
+        direction = glm.normalize(glm.vec3(local_dir))
+        # ------------------------------
+
         max_dist = 60.0 if is_rts else 8.0
         
-        # 2. Ensure the direction is a normalized vector
-        direction = glm.normalize(direction)
-
         # start point
         x1, y1, z1 = origin
         

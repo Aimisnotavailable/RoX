@@ -62,7 +62,7 @@ class Camera3D(ABC):
 
 
 class FPSCamera(Camera3D):
-    def __init__(self, position, yaw, pitch):
+    def __init__(self, position=PLAYER_POS, yaw=-90, pitch=0):
         super().__init__("FPS")
         self.position = glm.vec3(position)
         self.yaw = glm.radians(yaw)
