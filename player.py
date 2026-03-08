@@ -155,7 +155,7 @@ class Player:
             if key_state[pg.K_e]:
                 self.active_camera.move_down(vel)
         
-        scale_speed = 2.0 * self.engine.delta_time * 0.002
+        scale_speed = 2.0 * self.engine.delta_time * 0.001
         if key_state[pg.K_x]: 
             self.engine.scene.world.world_scale += scale_speed
         if key_state[pg.K_z]: 
