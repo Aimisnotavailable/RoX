@@ -6,6 +6,7 @@ from shader_program import ShaderProgram
 from scene import Scene
 from player import Player
 from textures import Textures
+from arcontroller import ARController
 
 
 class VoxelEngine:
@@ -39,10 +40,14 @@ class VoxelEngine:
         self.shader_program = ShaderProgram(self)
         self.scene = Scene(self)
 
+        self.ar_controller = ARController(self)
+
     def update(self):
         self.player.update()
         self.shader_program.update()
         self.scene.update()
+        
+        self.ar_controller.update()
 
         self.delta_time = self.clock.tick()
         self.time = pg.time.get_ticks() * 0.001

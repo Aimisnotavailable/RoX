@@ -5,6 +5,9 @@ import math
 import json
 import pygame
 from pathlib import Path
+from scripts.logger import get_logger_info
+import cv2
+
 RENDER_DISTANCE = 8
 
 # File format
