@@ -1,10 +1,13 @@
+# scene.py
 from settings import *
 import moderngl as mgl
 from world import World
 from world_objects.voxel_marker import VoxelMarker
 from world_objects.water import Water
 from world_objects.clouds import Clouds
-from hud import HUD  # <-- Import HUD
+
+# ---> ADD THIS IMPORT <---
+from hud import HUD
 
 class Scene:
     def __init__(self, engine):
@@ -14,8 +17,8 @@ class Scene:
         self.water = Water(engine)
         self.clouds = Clouds(engine)
         
-        # # Initialize HUD here instead of main.py
-        # self.hud = HUD(engine) 
+        # ---> ADD THIS INITIALIZATION <---
+        self.hud = HUD(engine)
 
     def update(self):
         self.world.update()
@@ -35,8 +38,12 @@ class Scene:
         # voxel selection
         self.voxel_marker.render()
 
-        # # --- HUD RENDERING ---
-        # # Disable depth testing so the 2D HUD draws on top of everything
-        # self.engine.ctx.disable(mgl.DEPTH_TEST)
-        # self.hud.render()
-        # self.engine.ctx.enable(mgl.DEPTH_TEST)
+        # ---> ADD THIS HUD RENDER PASS <---
+        # Disable DEPTH_TEST so the 2D UI doesn't clip into 3D chunks
+        self.engine.ctx.disable(mgl.DEPTH_TEST)
+        self.engine.ctx.enable(mgl.BLEND)
+        
+        self.hud.render()
+        
+        # Re-enable DEPTH_TEST for the next frame
+        self.engine.ctx.enable(mgl.DEPTH_TEST)
