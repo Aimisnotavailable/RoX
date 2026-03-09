@@ -34,13 +34,15 @@ class ARController:
         # --- Smoothed Engine Data ---
         self.smooth_left_landmarks = []
         self.smooth_right_landmarks = []
-        self.ema_alpha = 0.45  # Smoothing factor
+        self.ema_alpha = 0.1  # Smoothing factor
         
         # --- Public Engine Properties (HUD & Voxel Handler) ---
         self.smooth_left_pos = None  
         self.smooth_right_pos = None
         self.ar_mouse_pos = None
         self.ar_right_click = False
+        self._hand_type_left = "REAL"
+        self._hand_type_right = "REAL"
         
         # Gesture states
         self.last_rotate_pos = None
@@ -71,6 +73,9 @@ class ARController:
             # Extract raw, noisy pinch flags
             self._raw_left_pinch = ar_data["CLICK_FLAG"].get("LEFT", False)
             self._raw_right_pinch = ar_data["CLICK_FLAG"].get("RIGHT", False)
+
+            self._hand_type_left = ar_data['FRAME_TYPE'].get("LEFT", "REAL")
+            self._hand_type_right = ar_data['FRAME_TYPE'].get("RIGHT", "REAL")
 
     def _apply_ema(self, current_smooth, raw_new):
         """Applies Exponential Moving Average to the 21-point skeleton."""

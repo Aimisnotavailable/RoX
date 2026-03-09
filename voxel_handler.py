@@ -65,7 +65,7 @@ class VoxelHandler:
         ar_right_click = getattr(ar_controller, 'ar_right_click', False)
 
         if ar_mouse_pos is not None:
-            current_mouse_pos = glm.vec2(ar_mouse_pos[0] * WIN_RES[0], ar_mouse_pos[1] * WIN_RES[1])
+            current_mouse_pos = glm.vec2(ar_mouse_pos[0], ar_mouse_pos[1]) 
             mouse_pressed = ar_right_click
             
             if self.last_ar_mouse_pos is None:
@@ -73,7 +73,7 @@ class VoxelHandler:
                 
             # --- DAMPEN AR EXTRUSION SPEED ---
             # Multiply delta by 0.15 to prevent hyperspeed movement
-            mouse_delta = (current_mouse_pos - self.last_ar_mouse_pos) * 0.15 
+            mouse_delta = (current_mouse_pos - self.last_ar_mouse_pos)
             self.last_ar_mouse_pos = current_mouse_pos
         else:
             # PHYSICAL MOUSE FALLBACK

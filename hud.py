@@ -162,11 +162,19 @@ class HUD:
             self.draw_crosshair(px, py, r_color, right_pinch, r_status)
 
         # --- LEFT PANEL (Info) ---
+        left_tracking = f'ACTIVE : {ar._hand_type_left}'
+        right_tracking = f'ACTIVE : {ar._hand_type_right}'
+
+        if not left_pos:
+            left_tracking = "LOST"
+        if not right_pos:
+            right_tracking = "LOST"
+
         panel_rect = pg.Rect(20, 20, 320, 180)
         self.draw_glass_panel(panel_rect)
         self.draw_text("XR SPATIAL ENGINE", 35, 35, (255, 255, 255), self.title_font)
-        self.draw_text(f"LEFT TRACKING:  {'ACTIVE' if left_pos else 'LOST'}", 35, 75, (100, 255, 100) if left_pos else (255, 100, 100))
-        self.draw_text(f"RIGHT TRACKING: {'ACTIVE' if right_pos else 'LOST'}", 35, 100, (100, 255, 100) if right_pos else (255, 100, 100))
+        self.draw_text(f"LEFT TRACKING:  {left_tracking}", 35, 75, (100, 255, 100) if left_pos else (255, 100, 100))
+        self.draw_text(f"RIGHT TRACKING: {right_tracking}", 35, 100, (100, 255, 100) if right_pos else (255, 100, 100))
         self.draw_text(f"INPUT: {'AR OPTICAL FLOW' if ar.ar_mouse_pos else 'PHYSICAL MOUSE'}", 35, 135, (200, 200, 200))
         self.draw_text(f"WORLD SCALE: {self.engine.scene.world.world_scale:.2f}x", 35, 160, (200, 200, 200))
 

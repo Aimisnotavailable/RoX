@@ -28,7 +28,7 @@ MIDDLE_MCP_IDX  = 9
 WRIST_IDX       = 0
 
 HISTOGRAM_SIZE     = 10
-PINCH_ON_THRESH    = 0.15    # normalized units 
-PINCH_OFF_THRESH   = 0.20
+PINCH_ON_THRESH    = 0.30    # Triggers a click much earlier (was 0.15)
+PINCH_OFF_THRESH   = 0.45    # Releases the click smoothly (was 0.20)
 PINCH_FRAMES_REQ   = 3       # debounce frames
 # ------------------

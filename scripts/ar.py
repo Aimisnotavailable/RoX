@@ -79,7 +79,7 @@ class AR:
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(
             max_num_hands=2,
-            min_detection_confidence=0.6
+            min_detection_confidence=0.7
         )
 
         self.position_histogram = {'LEFT': [], 'RIGHT': []}
@@ -87,13 +87,13 @@ class AR:
         self.presence_counter = {'LEFT': 0, 'RIGHT': 0}
         self.presence_threshold_on = 2   
         self.presence_threshold_off = -2 
-        self.absent_reset_threshold = HISTOGRAM_SIZE
         self.pinch_absent_reset = max(3, HISTOGRAM_SIZE // 2)
         
         # --- GHOST KINEMATICS & TTL ---
         self.ghost_velocity = {'LEFT': [0.0, 0.0, 0.0], 'RIGHT': [0.0, 0.0, 0.0]}
         self.KINEMATIC_FRICTION = 0.85 
-        self.MAX_GHOST_TTL = HISTOGRAM_SIZE - 1 
+        self.MAX_GHOST_TTL = 15  
+        self.absent_reset_threshold = max(HISTOGRAM_SIZE, self.MAX_GHOST_TTL + 1) 
         self.ghost_ttl_counter = {'LEFT': 0, 'RIGHT': 0}
         self.ghost_age_default = 2
         
@@ -736,9 +736,14 @@ class AR:
                         speed = math.hypot(vx, vy)
                         
                         # STATIC FRICTION CUTOFF: If moving too slow, snap to a halt to prevent infinite drifting
+                        
                         if speed < 2.0:
                             self.ghost_velocity[label] = [0.0, 0.0, 0.0]
                             self._log('CORE', f'KINEMATIC HALT FOR {label}', True)
+                            
+                            # FIX: Mercy Kill. If it's stopped, don't let it hang around.
+                            if self.ghost_ttl_counter[label] > 3:
+                                self.ghost_ttl_counter[label] = 3
                         else:
                             # Apply dynamic friction
                             self.ghost_velocity[label][0] *= self.KINEMATIC_FRICTION
@@ -780,8 +785,10 @@ class AR:
                 else:
                     ar_data["FRAME_TYPE"][label] = "REAL" 
                     ar_data["POSITION_DATA"][label] = []
-
-                ar_data["CLICK_FLAG"][label] = False
+                    
+                last_pinch_state = self.detector.hands[label].is_pinched if label in self.detector.hands else False
+                
+                ar_data["CLICK_FLAG"][label] = last_pinch_state
                 ar_data["CLICK_DIST"][label] = 0
                 ar_data["SCALE"][label] = 1
 
