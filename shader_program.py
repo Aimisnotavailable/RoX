@@ -40,8 +40,8 @@ class ShaderProgram:
         self.clouds['bg_color'].write(BG_COLOR)
         self.clouds['cloud_scale'] = CLOUD_SCALE
 
-        # HUD
-        self.hud['tex'] = 0
+        # # HUD
+        # self.hud['tex'] = 0
 
     def update(self):
         self.chunk['m_view'].write(self.player.m_view)
