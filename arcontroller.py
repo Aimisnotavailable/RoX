@@ -1,79 +1,85 @@
 # arcontroller.py
+# arcontroller.py
 import threading
 import time
 import glm
 import cv2
+import time
+import glm
+import numpy as np
 from settings import *
 from scripts.ar import AR
+
+# Import your existing state manager!
+from src.handstateaction import HandActionState 
 
 class ARController:
     def __init__(self, engine):
         self.engine = engine
         self.ar = AR(WIN_RES)
+        self.cap = cv2.VideoCapture(0)
+        
         self.running = True
         
-        # --- Raw Thread-Safe Data (Producer) ---
+        # --- SMART HAND STATE MACHINES (Debouncing) ---
+        self.left_state = HandActionState()
+        self.right_state = HandActionState()
+        
+        # --- Raw Thread-Safe Data ---
         self._raw_left_landmarks = []
         self._raw_right_landmarks = []
         self._raw_left_pinch = False
         self._raw_right_pinch = False
         
-        # --- Smoothed Engine Data (Consumer) ---
+        # --- Smoothed Engine Data ---
         self.smooth_left_landmarks = []
         self.smooth_right_landmarks = []
+        self.ema_alpha = 0.45  # Smoothing factor
         
-        # Engine integration points (Index fingers)
+        # --- Public Engine Properties (HUD & Voxel Handler) ---
         self.smooth_left_pos = None  
         self.smooth_right_pos = None
         self.ar_mouse_pos = None
         self.ar_right_click = False
         
-        self.cap = cv2.VideoCapture(0)
-        # --- EMA Smoothing & Gestures ---
-        # EMA Alpha: 1.0 = raw input (no smooth), 0.1 = extremely heavy smoothing
-        # 0.45 is the sweet spot for fast AR tracking without jitter
-        self.ema_alpha = 0.45  
-        
+        # Gesture states
+        self.last_rotate_pos = None
         self.last_zoom_dist = None
-        self.last_left_pinch_pos = None
 
         get_logger_info('AR', f'THREAD FOR AR SYSTEM INITIALIZED')
         self.thread = threading.Thread(target=self._tracking_loop, daemon=True)
         self.thread.start()
 
     def _tracking_loop(self):
+        """Asynchronous daemon thread for computer vision."""
         while self.running:
-            
-            # Safely extract raw data dumped by your Optical Flow script
             ret, frame = self.cap.read()
-            frame = cv2.flip(frame, 1)
-            ar_data = None
-            if ret:
-                ar_data = self.ar.update(frame)
-
+            if not ret:
+                continue
+                
+            frame = cv2.flip(frame, 1) # Mirror Mode
+            
+            ar_data = self.ar.update(frame)
+            
             if ar_data is None:
-               continue 
-            
-            
-            # Extract full 21 landmarks instead of just point 8
+                continue
+
+            # Extract full 21 landmarks safely
             self._raw_left_landmarks = ar_data["POSITION_DATA"].get("LEFT", [])
             self._raw_right_landmarks = ar_data["POSITION_DATA"].get("RIGHT", [])
             
+            # Extract raw, noisy pinch flags
             self._raw_left_pinch = ar_data["CLICK_FLAG"].get("LEFT", False)
             self._raw_right_pinch = ar_data["CLICK_FLAG"].get("RIGHT", False)
-            
-            time.sleep(0.016)
 
     def _apply_ema(self, current_smooth, raw_new):
-        """Applies Exponential Moving Average to an array of 21 landmarks."""
+        """Applies Exponential Moving Average to the 21-point skeleton."""
         if not raw_new or len(raw_new) < 21:
             return []
             
-        # If we just detected the hand, snap directly to raw positions
         if not current_smooth or len(current_smooth) < 21:
             return [glm.vec2(p[0], p[1]) for p in raw_new]
             
-        # Apply EMA filter to each joint independently
         smoothed = []
         for i in range(21):
             target = glm.vec2(raw_new[i][0], raw_new[i][1])
@@ -83,47 +89,61 @@ class ARController:
         return smoothed
 
     def update(self):
-        # 1. APPLY EMA TO FULL SKELETONS
+        """Fast-tick loop running on the main Engine thread."""
+        now = time.time()
+
+        # 1. APPLY EMA TO SKELETONS (For HUD Rendering)
         self.smooth_left_landmarks = self._apply_ema(self.smooth_left_landmarks, self._raw_left_landmarks)
         self.smooth_right_landmarks = self._apply_ema(self.smooth_right_landmarks, self._raw_right_landmarks)
 
-        # 2. EXTRACT INDEX TIPS FOR ENGINE CONTROLS (Landmark 8)
-        if len(self.smooth_left_landmarks) > 8:
-            self.smooth_left_pos = self.smooth_left_landmarks[8]
-        else:
-            self.smooth_left_pos = None
+        # 2. EXTRACT SMOOTH INDEX TIPS
+        l_index = self.smooth_left_landmarks[8] if len(self.smooth_left_landmarks) > 8 else None
+        r_index = self.smooth_right_landmarks[8] if len(self.smooth_right_landmarks) > 8 else None
 
-        if len(self.smooth_right_landmarks) > 8:
-            self.smooth_right_pos = self.smooth_right_landmarks[8]
-            self.ar_mouse_pos = (self.smooth_right_pos.x, self.smooth_right_pos.y)
-            self.ar_right_click = self._raw_right_pinch
-        else:
-            self.smooth_right_pos = None
-            self.ar_mouse_pos = None
-            self.ar_right_click = False
+        l_pos_tuple = (l_index.x, l_index.y) if l_index else None
+        r_pos_tuple = (r_index.x, r_index.y) if r_index else None
 
-        # 3. GESTURE CONTROLS (Rotation & Zoom)
+        # 3. UPDATE HAND STATE MACHINES (The Debounce Magic!)
+        self.left_state.update(self._raw_left_pinch, l_pos_tuple, now)
+        self.right_state.update(self._raw_right_pinch, r_pos_tuple, now)
+
+        # 4. EXPOSE STABLE DATA TO ENGINE
+        self.smooth_left_pos = l_index
+        self.smooth_right_pos = r_index
+        
+        # Voxel Handler strictly respects the debounced 'active' state now
+        self.ar_mouse_pos = self.right_state.current_pos 
+        self.ar_right_click = self.right_state.active  
+
+        # 5. GESTURE CONTROLS (World Rotation & Zoom)
         world = self.engine.scene.world
-        is_left_pinched = self._raw_left_pinch and self.smooth_left_pos is not None
-        is_right_pinched = self._raw_right_pinch and self.smooth_right_pos is not None
+        
+        # Use the highly stable debounced states for gestures
+        l_active = self.left_state.active
+        r_active = self.right_state.active
 
-        if is_left_pinched and is_right_pinched:
-            current_dist = glm.distance(self.smooth_left_pos, self.smooth_right_pos)
+        # Double Pinch = Zoom
+        if l_active and r_active and l_index and r_index:
+            current_dist = glm.distance(l_index, r_index)
             if self.last_zoom_dist is not None:
                 delta_zoom = (current_dist - self.last_zoom_dist) * 0.005
                 world.world_scale += delta_zoom
-                world.world_scale = max(0.1, min(10.0, world.world_scale))
-            self.last_zoom_dist = current_dist
-            self.last_left_pinch_pos = None 
+                world.world_scale = max(0.1, min(10.0, world.world_scale)) # Clamp scale
             
-        elif is_left_pinched and not is_right_pinched:
-            self.last_zoom_dist = None 
-            if self.last_left_pinch_pos is not None:
-                delta_rot = self.smooth_left_pos - self.last_left_pinch_pos
+            self.last_zoom_dist = current_dist
+            self.last_rotate_pos = None # Interrupt rotation
+            
+        # Left Pinch Only = Rotate World
+        elif l_active and not r_active and l_index:
+            self.last_zoom_dist = None
+            
+            if self.last_rotate_pos is not None:
+                delta_rot = l_index - self.last_rotate_pos
                 world.world_yaw += delta_rot.x * 0.005
                 world.world_pitch += delta_rot.y * 0.005
-            self.last_left_pinch_pos = glm.vec2(self.smooth_left_pos)
+                
+            self.last_rotate_pos = glm.vec2(l_index)
             
         else:
             self.last_zoom_dist = None
-            self.last_left_pinch_pos = None
+            self.last_rotate_pos = None
