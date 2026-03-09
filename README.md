@@ -92,7 +92,7 @@ If the user was pinching, the Ghost Frame holds that pinch through the camera st
 
 ## Features & Architecture
 
-* **Dual-Engine Architecture:** Toggle between `3Drox.py` (perspective building) and `2Drox.py` (top-down design).
+* **Dual-Engine Architecture:** Toggle between `3Drox.py` (perspective building) and `2Drox.py`.
 * **State-Driven Interaction:** Uses a robust state machine (`HandActionState`) to handle gesture debouncing and pinch stability.
 * **ModernGL Pipeline:** Custom GLSL shaders handle real-time lighting and texture-array indexing for varied voxel types.
 
