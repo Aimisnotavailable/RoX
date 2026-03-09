@@ -23,37 +23,29 @@ class VoxelHandler:
         
         # --- Smart Drag-to-Build State ---
         self.is_dragging = False
-        self.snap_normal = None    
-        self.exact_pos = None      
-        self.place_pos = None      
-        self.sensitivity = 0.05    
-
-        # --- FPS Continuous Action State ---
-        self.action_timer = 0.0
-        self.action_delay = 100.0  # Delay in milliseconds between block actions when holding click
-
-        get_logger_info('ENGINE', 'VoxelHandler initialized successfully.')
+        self.snap_normal = None    # The 3D axis we lock onto (e.g., (1, 0, 0))
+        self.exact_pos = None      # The float position during the drag
+        self.place_pos = None      # The snapped integer position
+        self.sensitivity = 0.05    # Adjust to make mouse dragging faster/slower
+        self.last_ar_mouse_pos = None
 
     # ==========================================
     # --- CORE UPDATE LOOP ---
     # ==========================================
     
     def update(self):
-        # Tick the cooldown timer down
-        self.action_timer = max(0.0, self.action_timer - self.engine.delta_time)
-
-        # Handle mouse input based on camera mode
-        if self.engine.player.mode == "FPS":
-            self.handle_fps_input()
-        elif self.engine.player.mode == "RTS":
-            self.handle_rts_input()
+        self.handle_input()
         
-        # Only shoot the raycast if we aren't currently dragging a line of blocks
+        # Safely fetch active AR cursor state
+        ar_controller = getattr(self.engine, 'ar_controller', None)
+        ar_mouse_pos = getattr(ar_controller, 'ar_mouse_pos', None)
+        
         if not self.is_dragging:
             if self.engine.player.mode == "FPS":
                 self.raycast_fps(self.engine.player.position, self.engine.player.forward)
             elif self.engine.player.mode == "RTS":
-                ray_origin, ray_direction = self.get_rts_ray()
+                # get_rts_ray accepts screen_pos override naturally
+                ray_origin, ray_direction = self.get_rts_ray(screen_pos=ar_mouse_pos)
                 self.raycast_rts(ray_origin, ray_direction)
 
 
@@ -61,67 +53,51 @@ class VoxelHandler:
     # --- INPUT HANDLING ---
     # ==========================================
 
-    def handle_fps_input(self):
-        mouse_pressed = pg.mouse.get_pressed()[0] # Left click
-        
-        # Continuous click action with delay
-        if mouse_pressed and self.action_timer <= 0.0:
-            if self.interaction_mode == 1:
-                self.add_voxel()
-            else:
-                self.remove_voxel()
-                
-            # Reset timer
-            self.action_timer = self.action_delay
+    def handle_input(self):
+        # FIX: Only restrict by Player Mode, allowing both Add (1) and Remove (0) modes
+        if self.engine.player.mode != "RTS":
+            self.is_dragging = False
+            return
 
-    def handle_rts_input(self):
-        # Base physical mouse state
-        mouse_pressed = pg.mouse.get_pressed()[0]
-        
-        # Check if AR is currently active and tracking
-        ar_active = getattr(self.engine, 'ar_mouse_pos', None) is not None
+        # --- SEAMLESS INPUT FALLBACK SYSTEM ---
+        ar_controller = getattr(self.engine, 'ar_controller', None)
+        ar_mouse_pos = getattr(ar_controller, 'ar_mouse_pos', None)
+        ar_right_click = getattr(ar_controller, 'ar_right_click', False)
 
-        if ar_active:
-            # Override click with AR pinch
-            if getattr(self.engine, 'ar_right_click', False):
-                mouse_pressed = True
-
-            # Override relative movement with AR cursor
-            curr_pos = self.engine.ar_mouse_pos
-            if getattr(self, 'last_ar_pos', None) is None: 
-                self.last_ar_pos = curr_pos
-                
-            rel_x = curr_pos[0] - self.last_ar_pos[0]
-            rel_y = curr_pos[1] - self.last_ar_pos[1]
-            self.last_ar_pos = curr_pos
-        else:
-            # Fallback to physical mouse
-            rel_x, rel_y = pg.mouse.get_rel()
-            self.last_ar_pos = None # Reset AR history so it doesn't jump when re-detected
+        if ar_mouse_pos is not None:
+            current_mouse_pos = glm.vec2(ar_mouse_pos[0] * WIN_RES[0], ar_mouse_pos[1] * WIN_RES[1])
+            mouse_pressed = ar_right_click
             
-        mouse_delta = glm.vec2(rel_x, rel_y)
+            if self.last_ar_mouse_pos is None:
+                self.last_ar_mouse_pos = current_mouse_pos
+                
+            # --- DAMPEN AR EXTRUSION SPEED ---
+            # Multiply delta by 0.15 to prevent hyperspeed movement
+            mouse_delta = (current_mouse_pos - self.last_ar_mouse_pos) * 0.15 
+            self.last_ar_mouse_pos = current_mouse_pos
+        else:
+            # PHYSICAL MOUSE FALLBACK
+            self.last_ar_mouse_pos = None 
+            mouse_pressed = pg.mouse.get_pressed()[0]
+            rel_x, rel_y = pg.mouse.get_rel()
+            mouse_delta = glm.vec2(rel_x, rel_y)
 
         # 1. START DRAG
         if mouse_pressed and not self.is_dragging:
             if self.voxel_id and self.voxel_normal: 
                 self.is_dragging = True
-                self.snap_normal = glm.vec3(self.voxel_normal)
                 
-                # If ADDING, start at the empty block face. If REMOVING, start inside the block itself!
-                if self.interaction_mode == 1:
+                # BRANCH: Start position and direction based on mode
+                if self.interaction_mode == 1: # ADD
+                    self.snap_normal = glm.vec3(self.voxel_normal)
                     self.exact_pos = glm.vec3(self.voxel_world_pos) + self.snap_normal
-                else:
+                else: # REMOVE
+                    # Inverse the normal to drag "into" the geometry
+                    self.snap_normal = -glm.vec3(self.voxel_normal) 
                     self.exact_pos = glm.vec3(self.voxel_world_pos)
                     
                 self.place_pos = glm.vec3(self.exact_pos)
-                
-                get_logger_info('DEBUG', f'Started Drag Action along axis: {tuple(self.snap_normal)}')
-                
-                # Instantly apply the first block action
-                if self.interaction_mode == 1:
-                    self._place_block_at(self.place_pos)
-                else:
-                    self._remove_block_at(self.place_pos)
+                self._apply_drag_modification(self.place_pos)
 
         # 2. DURING DRAG
         elif mouse_pressed and self.is_dragging:
@@ -134,11 +110,7 @@ class VoxelHandler:
                 
                 if snapped != self.place_pos:
                     self.place_pos = snapped
-                    # Apply action to the new coordinate
-                    if self.interaction_mode == 1:
-                        self._place_block_at(self.place_pos)
-                    else:
-                        self._remove_block_at(self.place_pos)
+                    self._apply_drag_modification(self.place_pos)
 
         # 3. END DRAG
         elif not mouse_pressed and self.is_dragging:
@@ -147,12 +119,24 @@ class VoxelHandler:
             self.snap_normal = None
             self.exact_pos = None
 
+    def _apply_drag_modification(self, pos):
+        """Internal helper to route drag updates to the correct voxel method."""
+        if self.interaction_mode == 1:
+            # Call your existing single-block placement helper
+            self._place_block_at(pos) 
+        else:
+            # Manual removal logic for specific coordinates
+            voxel_id, voxel_index, local_pos, chunk = self.get_voxel_id(pos)
+            if chunk is not None and voxel_id != 0:
+                chunk.voxels[int(voxel_index)] = 0
+                chunk.mesh.rebuild()
+                self._rebuild_adj_for_pos(local_pos, pos)
+
     def get_screen_axis_direction(self):
         if self.snap_normal is None or self.exact_pos is None:
             return glm.vec2(0)
 
         m_model = self.world.m_model 
-
         p1 = m_model * glm.vec4(self.exact_pos, 1.0)
         p2 = m_model * glm.vec4(self.exact_pos + glm.vec3(self.snap_normal), 1.0)
         
@@ -166,12 +150,8 @@ class VoxelHandler:
         n2 = glm.vec3(c2) / c2.w
         
         screen_dir = glm.vec2(n2.x - n1.x, -(n2.y - n1.y)) 
-        
         length = glm.length(screen_dir)
-        if length < 0.0001:
-            return glm.vec2(0)
-            
-        return screen_dir / length
+        return screen_dir / length if length > 0.0001 else glm.vec2(0)
 
 
     # ==========================================
@@ -208,19 +188,12 @@ class VoxelHandler:
 
     def raycast_generic(self, origin, direction, is_rts=False):
         inv_model = glm.inverse(self.world.m_model)
-        
-        local_origin = inv_model * glm.vec4(origin, 1.0)
-        origin = glm.vec3(local_origin)
-        
-        local_dir = inv_model * glm.vec4(direction, 0.0)
-        direction = glm.normalize(glm.vec3(local_dir))
+        local_origin = glm.vec3(inv_model * glm.vec4(origin, 1.0))
+        local_dir = glm.normalize(glm.vec3(inv_model * glm.vec4(direction, 0.0)))
 
         max_dist = 60.0 if is_rts else 8.0
-        
-        x1, y1, z1 = origin
-        x2 = x1 + direction.x * max_dist
-        y2 = y1 + direction.y * max_dist
-        z2 = z1 + direction.z * max_dist
+        x1, y1, z1 = local_origin
+        x2, y2, z2 = local_origin + local_dir * max_dist
 
         current_voxel_pos = glm.ivec3(x1, y1, z1)
         self.voxel_id = 0
@@ -245,12 +218,9 @@ class VoxelHandler:
                 self.voxel_id, self.voxel_index, self.voxel_local_pos, self.chunk = result
                 self.voxel_world_pos = current_voxel_pos
 
-                if step_dir == 0:
-                    self.voxel_normal.x = -dx
-                elif step_dir == 1:
-                    self.voxel_normal.y = -dy
-                else:
-                    self.voxel_normal.z = -dz
+                if step_dir == 0: self.voxel_normal.x = -dx
+                elif step_dir == 1: self.voxel_normal.y = -dy
+                else: self.voxel_normal.z = -dz
                 return True
 
             if max_x < max_y:
@@ -279,9 +249,13 @@ class VoxelHandler:
     # ==========================================
 
     def set_voxel(self):
-        # We now handle left-clicks internally via update() & handle_fps_input()! 
-        # Kept this function empty so player.py doesn't crash if it tries to call it.
-        pass 
+        """Triggered by single clicks."""
+        if self.is_dragging: return
+            
+        if self.interaction_mode:
+            self.add_voxel()
+        else:
+            self.remove_voxel()
 
     def add_voxel(self):
         if self.voxel_id:
@@ -297,33 +271,16 @@ class VoxelHandler:
         if not result[0]: # If space is empty
             _, voxel_index, voxel_local_pos, chunk = result
             if chunk is not None:
-                safe_index = int(voxel_index)
-                
-                chunk.voxels[safe_index] = self.new_voxel_id
+                chunk.voxels[int(voxel_index)] = self.new_voxel_id
                 chunk.mesh.rebuild()
-                if chunk.is_empty:
-                    chunk.is_empty = False
-                
-                sanitized_pos = (int(math.floor(pos[0])), int(math.floor(pos[1])), int(math.floor(pos[2])))
-                get_logger_info('DEBUG', f'Placed block [ID: {self.new_voxel_id}] at {sanitized_pos}')
-
+                if chunk.is_empty: chunk.is_empty = False
                 self._rebuild_adj_for_pos(voxel_local_pos, pos)
 
-    def _remove_block_at(self, pos):
-        """Universal helper to safely remove a block at a coordinate."""
-        result = self.get_voxel_id(pos)
-        if result[0]: # If a block actually exists here
-            _, voxel_index, voxel_local_pos, chunk = result
-            if chunk is not None:
-                safe_index = int(voxel_index)
-                
-                chunk.voxels[safe_index] = 0
-                chunk.mesh.rebuild()
-                
-                sanitized_pos = (int(math.floor(pos[0])), int(math.floor(pos[1])), int(math.floor(pos[2])))
-                get_logger_info('DEBUG', f'Removed block at {sanitized_pos}')
-
-                self._rebuild_adj_for_pos(voxel_local_pos, pos)
+    def remove_voxel(self):
+        if self.voxel_id:
+            self.chunk.voxels[int(self.voxel_index)] = 0
+            self.chunk.mesh.rebuild()
+            self._rebuild_adj_for_pos(self.voxel_local_pos, self.voxel_world_pos)
 
     def switch_mode(self):
         self.interaction_mode = not self.interaction_mode
@@ -336,10 +293,8 @@ class VoxelHandler:
 
         if lx == 0: self.rebuild_adj_chunk((wx - 1, wy, wz))
         elif lx == CHUNK_SIZE - 1: self.rebuild_adj_chunk((wx + 1, wy, wz))
-
         if ly == 0: self.rebuild_adj_chunk((wx, wy - 1, wz))
         elif ly == CHUNK_SIZE - 1: self.rebuild_adj_chunk((wx, wy + 1, wz))
-
         if lz == 0: self.rebuild_adj_chunk((wx, wy, wz - 1))
         elif lz == CHUNK_SIZE - 1: self.rebuild_adj_chunk((wx, wy, wz + 1))
 
@@ -350,24 +305,14 @@ class VoxelHandler:
             self.chunks[index].mesh.rebuild()
 
     def get_voxel_id(self, voxel_world_pos):
-        wx = int(math.floor(voxel_world_pos[0]))
-        wy = int(math.floor(voxel_world_pos[1]))
-        wz = int(math.floor(voxel_world_pos[2]))
-        
+        wx, wy, wz = int(math.floor(voxel_world_pos[0])), int(math.floor(voxel_world_pos[1])), int(math.floor(voxel_world_pos[2]))
         cx, cy, cz = wx // CHUNK_SIZE, wy // CHUNK_SIZE, wz // CHUNK_SIZE
 
         if 0 <= cx < WORLD_W and 0 <= cy < WORLD_H and 0 <= cz < WORLD_D:
             chunk_index = int(cx + WORLD_W * cz + WORLD_AREA * cy)
             chunk = self.chunks[chunk_index]
-            
             if chunk is not None:
-                lx = int(wx - cx * CHUNK_SIZE)
-                ly = int(wy - cy * CHUNK_SIZE)
-                lz = int(wz - cz * CHUNK_SIZE)
-                
+                lx, ly, lz = int(wx - cx * CHUNK_SIZE), int(wy - cy * CHUNK_SIZE), int(wz - cz * CHUNK_SIZE)
                 voxel_index = int(lx + CHUNK_SIZE * lz + CHUNK_AREA * ly)
-                voxel_id = chunk.voxels[voxel_index]
-                
-                return voxel_id, voxel_index, (lx, ly, lz), chunk
-                
+                return chunk.voxels[voxel_index], voxel_index, (lx, ly, lz), chunk
         return 0, 0, (0, 0, 0), None
