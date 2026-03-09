@@ -1,4 +1,3 @@
-```markdown
 # RoX: An Experimental AR Voxel Engine
 
 RoX is a custom-built **Augmented Reality voxel engine** that turns a standard webcam into a spatial computing sensor. Built entirely from scratch in Python, it bridges the gap between raw computer vision and hardware-accelerated 3D rendering.
@@ -26,7 +25,7 @@ RoX includes a built-in comparison tool that runs the raw MediaPipe feed side-by
 ```bash
 python demo_rox.py --input path/to/video.mp4 --output results/comparison.gif --fps 20
 
-```
+
 
 *(This script processes a test video and generates a side-by-side comparison of tracking stability.)*
 
