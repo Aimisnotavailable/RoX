@@ -21,14 +21,16 @@ WIDTH = get_monitors()[0].width
 
 
 # ---- AR CONFIG & UTILS --- #
-# --- CONFIGURATION & INDICES ---
+# --- Hand landmark indices (MediaPipe) ---
 THUMB_TIP_IDX   = 4
 INDEX_TIP_IDX   = 8
-MIDDLE_MCP_IDX  = 9
+INDEX_MCP_IDX   = 5      # Index finger MCP (base)
+MIDDLE_MCP_IDX  = 9      # Middle finger MCP
+PINKY_MCP_IDX   = 17     # Pinky finger MCP
 WRIST_IDX       = 0
 
+# --- History and pinch detection ---
 HISTOGRAM_SIZE     = 10
-PINCH_ON_THRESH    = 0.30    # Triggers a click much earlier (was 0.15)
-PINCH_OFF_THRESH   = 0.45    # Releases the click smoothly (was 0.20)
-PINCH_FRAMES_REQ   = 3       # debounce frames
-# ------------------
+PINCH_ON_THRESH    = 0.30    # Triggers a click earlier
+PINCH_OFF_THRESH   = 0.45    # Releases the click smoothly
+PINCH_FRAMES_REQ   = 3       # Debounce frames
