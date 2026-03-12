@@ -3,6 +3,7 @@ import glm
 import math
 from settings import *
 from meshes.chunk_mesh_builder import get_chunk_index
+from scripts.logger import get_logger_info
 
 class VoxelHandler:
     def __init__(self, world):
@@ -19,24 +20,23 @@ class VoxelHandler:
         self.voxel_normal = None
 
         self.interaction_mode = 0  # 0: remove voxel   1: add voxel
-        self.new_voxel_id = WOOD   # Assuming WOOD is defined in settings.py
+        self.new_voxel_id = WOOD
         
-        # --- Smart Drag-to-Build State ---
+        # --- Drag state ---
         self.is_dragging = False
-        self.snap_normal = None    # The 3D axis we lock onto (e.g., (1, 0, 0))
-        self.exact_pos = None      # The float position during the drag
-        self.place_pos = None      # The snapped integer position
-        self.sensitivity = 0.05    # Adjust to make mouse dragging faster/slower
+        self.snap_normal = None
+        self.exact_pos = None
+        self.place_pos = None
+        self.sensitivity = 0.05
         self.last_ar_mouse_pos = None
 
-    # ==========================================
-    # --- CORE UPDATE LOOP ---
-    # ==========================================
-    
+        # --- DEPTH INTEGRATION: brush multiplier ---
+        self.brush_mult = 1.0                     # current multiplier (applied to movement)
+        self.drag_start_depth = None               # right hand depth at drag start
+
     def update(self):
         self.handle_input()
         
-        # Safely fetch active AR cursor state
         ar_controller = getattr(self.engine, 'ar_controller', None)
         ar_mouse_pos = getattr(ar_controller, 'ar_mouse_pos', None)
         
@@ -44,22 +44,14 @@ class VoxelHandler:
             if self.engine.player.mode == "FPS":
                 self.raycast_fps(self.engine.player.position, self.engine.player.forward)
             elif self.engine.player.mode == "RTS":
-                # get_rts_ray accepts screen_pos override naturally
                 ray_origin, ray_direction = self.get_rts_ray(screen_pos=ar_mouse_pos)
                 self.raycast_rts(ray_origin, ray_direction)
 
-
-    # ==========================================
-    # --- INPUT HANDLING ---
-    # ==========================================
-
     def handle_input(self):
-        # FIX: Only restrict by Player Mode, allowing both Add (1) and Remove (0) modes
         if self.engine.player.mode != "RTS":
             self.is_dragging = False
             return
 
-        # --- SEAMLESS INPUT FALLBACK SYSTEM ---
         ar_controller = getattr(self.engine, 'ar_controller', None)
         ar_mouse_pos = getattr(ar_controller, 'ar_mouse_pos', None)
         ar_right_click = getattr(ar_controller, 'ar_right_click', False)
@@ -67,45 +59,64 @@ class VoxelHandler:
         if ar_mouse_pos is not None:
             current_mouse_pos = glm.vec2(ar_mouse_pos[0], ar_mouse_pos[1]) 
             mouse_pressed = ar_right_click
-            
             if self.last_ar_mouse_pos is None:
                 self.last_ar_mouse_pos = current_mouse_pos
-                
-            # --- DAMPEN AR EXTRUSION SPEED ---
-            # Multiply delta by 0.15 to prevent hyperspeed movement
             mouse_delta = (current_mouse_pos - self.last_ar_mouse_pos)
             self.last_ar_mouse_pos = current_mouse_pos
         else:
-            # PHYSICAL MOUSE FALLBACK
             self.last_ar_mouse_pos = None 
             mouse_pressed = pg.mouse.get_pressed()[0]
             rel_x, rel_y = pg.mouse.get_rel()
             mouse_delta = glm.vec2(rel_x, rel_y)
 
+        # --- DEPTH INTEGRATION: brush multiplier from right hand depth delta ---
+        current_depth = None
+        if ar_controller and ar_controller.smooth_right_pos is not None:
+            current_depth = ar_controller.smooth_right_pos.z
+
         # 1. START DRAG
         if mouse_pressed and not self.is_dragging:
             if self.voxel_id and self.voxel_normal: 
                 self.is_dragging = True
-                
-                # BRANCH: Start position and direction based on mode
                 if self.interaction_mode == 1: # ADD
                     self.snap_normal = glm.vec3(self.voxel_normal)
                     self.exact_pos = glm.vec3(self.voxel_world_pos) + self.snap_normal
                 else: # REMOVE
-                    # Inverse the normal to drag "into" the geometry
                     self.snap_normal = -glm.vec3(self.voxel_normal) 
                     self.exact_pos = glm.vec3(self.voxel_world_pos)
-                    
                 self.place_pos = glm.vec3(self.exact_pos)
                 self._apply_drag_modification(self.place_pos)
+
+                # Store initial depth for brush multiplier
+                if current_depth is not None:
+                    self.drag_start_depth = current_depth
+                    self.brush_mult = 1.0
+                else:
+                    self.drag_start_depth = None
 
         # 2. DURING DRAG
         elif mouse_pressed and self.is_dragging:
             if self.snap_normal is not None:
                 screen_dir = self.get_screen_axis_direction()
-                pixel_movement = glm.dot(mouse_delta, screen_dir)
+
+                # --- Depth scaling: speed factor ---
+                speed_factor = 1.0
+                if current_depth is not None:
+                    # Map depth 0..1 to factor Z_DRAG_SPEED_MIN..Z_DRAG_SPEED_MAX (from settings)
+                    speed_factor = max(Z_DRAG_SPEED_MIN, min(Z_DRAG_SPEED_MAX, 1.0 + (current_depth - 0.5) * 1.5))
+
+                # --- Depth delta: brush multiplier ---
+                if self.drag_start_depth is not None and current_depth is not None:
+                    delta_z = current_depth - self.drag_start_depth
+                    # Adjust brush multiplier: moving in (negative delta) decreases multiplier? Or increases?
+                    # Let's define: moving hand forward (closer) = smaller brush (more precision)
+                    self.brush_mult = 1.0 + delta_z * RIGHT_BRUSH_SENSITIVITY
+                    self.brush_mult = max(BRUSH_MULT_MIN, min(BRUSH_MULT_MAX, self.brush_mult))
+
+                # Combined movement
+                pixel_movement = glm.dot(mouse_delta, screen_dir) * self.sensitivity * speed_factor * self.brush_mult
                 
-                self.exact_pos += self.snap_normal * (pixel_movement * self.sensitivity)
+                self.exact_pos += self.snap_normal * pixel_movement
                 snapped = glm.round(self.exact_pos)
                 
                 if snapped != self.place_pos:
@@ -118,14 +129,13 @@ class VoxelHandler:
             self.is_dragging = False
             self.snap_normal = None
             self.exact_pos = None
+            self.drag_start_depth = None
+            self.brush_mult = 1.0
 
     def _apply_drag_modification(self, pos):
-        """Internal helper to route drag updates to the correct voxel method."""
         if self.interaction_mode == 1:
-            # Call your existing single-block placement helper
             self._place_block_at(pos) 
         else:
-            # Manual removal logic for specific coordinates
             voxel_id, voxel_index, local_pos, chunk = self.get_voxel_id(pos)
             if chunk is not None and voxel_id != 0:
                 chunk.voxels[int(voxel_index)] = 0

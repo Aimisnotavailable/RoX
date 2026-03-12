@@ -96,3 +96,15 @@ WATER_AREA = 5 * CHUNK_SIZE * WORLD_W
 # cloud
 CLOUD_SCALE = 25
 CLOUD_HEIGHT = WORLD_H * CHUNK_SIZE * 2
+
+# -------------------- DEPTH INTEGRATION --------------------
+# AR depth gesture settings
+LEFT_ZOOM_SENSITIVITY = 2.0      # how much depth delta affects world scale
+LEFT_ZOOM_MIN = 0.1
+LEFT_ZOOM_MAX = 10.0
+
+RIGHT_BRUSH_SENSITIVITY = 1.5    # how much depth delta affects brush multiplier
+BRUSH_MULT_MIN = 0.5
+BRUSH_MULT_MAX = 3.0
+
+BOTH_HANDS_HOLD_TIME = 1.0       # seconds to hold both pinched to trigger action
