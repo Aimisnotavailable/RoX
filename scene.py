@@ -6,8 +6,8 @@ from world_objects.voxel_marker import VoxelMarker
 from world_objects.water import Water
 from world_objects.clouds import Clouds
 
-# ---> ADD THIS IMPORT <---
 from hud import HUD
+from world_objects.hand_renderer import HandRenderer
 
 class Scene:
     def __init__(self, engine):
@@ -17,6 +17,9 @@ class Scene:
         self.water = Water(engine)
         self.clouds = Clouds(engine)
         
+        self.hand_left = HandRenderer(engine, 'LEFT')
+        self.hand_right = HandRenderer(engine, 'RIGHT')
+
         # ---> ADD THIS INITIALIZATION <---
         self.hud = HUD(engine)
 
@@ -24,6 +27,12 @@ class Scene:
         self.world.update()
         self.voxel_marker.update()
         self.clouds.update()
+
+        ar = self.engine.ar_controller
+        if ar:
+            self.hand_left.update(ar.smooth_left_landmarks)
+            self.hand_right.update(ar.smooth_right_landmarks)
+
 
     def render(self):
         # chunks rendering
@@ -34,6 +43,9 @@ class Scene:
         self.clouds.render()
         self.water.render()
         self.engine.ctx.enable(mgl.CULL_FACE)
+
+        self.hand_left.render()
+        self.hand_right.render()
 
         # voxel selection
         self.voxel_marker.render()

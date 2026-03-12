@@ -99,12 +99,22 @@ CLOUD_HEIGHT = WORLD_H * CHUNK_SIZE * 2
 
 # -------------------- DEPTH INTEGRATION --------------------
 # AR depth gesture settings
+
+Z_NEAR = 0.3          # closer than this -> remove mode
+Z_FAR = 0.7           # farther than this -> add mode
+Z_HYSTERESIS = 0.05   # dead zone to avoid flickering
+Z_HOLD_FRAMES = 5     # frames to hold depth before switching mode
+Z_DRAG_SPEED_MIN = 0.3
+Z_DRAG_SPEED_MAX = 2.0
+Z_ROTATION_MIN = 0.5
+Z_ROTATION_MAX = 2.0
+
 LEFT_ZOOM_SENSITIVITY = 2.0      # how much depth delta affects world scale
 LEFT_ZOOM_MIN = 0.1
 LEFT_ZOOM_MAX = 10.0
 
 RIGHT_BRUSH_SENSITIVITY = 1.5    # how much depth delta affects brush multiplier
-BRUSH_MULT_MIN = 0.5
+BRUSH_MULT_MIN = 2
 BRUSH_MULT_MAX = 3.0
 
 BOTH_HANDS_HOLD_TIME = 1.0       # seconds to hold both pinched to trigger action

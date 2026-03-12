@@ -140,14 +140,14 @@ class HUD:
 
         # Left hand
         if left_pos is not None:
-            self.draw_skeleton(l_landmarks, l_color, left_pinch)
+            # self.draw_skeleton(l_landmarks, l_color, left_pinch)
             px, py = self.get_screen_coords(left_pos)
             self.draw_crosshair(px, py, l_color, left_pinch, l_status)
             self.draw_text(f"Z: {left_pos.z:.2f}", px + 25, py - 15, (200, 200, 200))
 
         # Right hand
         if right_pos is not None:
-            self.draw_skeleton(r_landmarks, r_color, right_pinch)
+            # self.draw_skeleton(r_landmarks, r_color, right_pinch)
             px, py = self.get_screen_coords(right_pos)
             self.draw_crosshair(px, py, r_color, right_pinch, r_status)
             self.draw_text(f"Z: {right_pos.z:.2f}", px + 25, py - 30, (200, 200, 200))

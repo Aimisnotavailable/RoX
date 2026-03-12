@@ -12,6 +12,9 @@ class ShaderProgram:
         self.water = self.get_program('water')
         self.clouds = self.get_program('clouds')
         self.hud = self.get_program('hud')
+
+        self.hand = self.get_program('hand')
+        self.shadow = self.get_program('shadow')
         # ------------------------- #
         self.set_uniforms_on_init()
 
