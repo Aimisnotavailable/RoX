@@ -15,12 +15,98 @@ HAND_CONNECTIONS = [
     (13, 17), (0, 17), (17, 18), (18, 19), (19, 20) # Pinky & Palm
 ]
 
+# Radial menu configuration
+RADIAL_MENU_RADIUS = 120
+RADIAL_MENU_OPTIONS = [
+    {"name": "SAND",   "color": (245, 222, 179), "voxel_id": 1},
+    {"name": "GRASS",  "color": (34, 139, 34),   "voxel_id": 2},
+    {"name": "DIRT",   "color": (101, 67, 33),   "voxel_id": 3},
+    {"name": "STONE",  "color": (128, 128, 128), "voxel_id": 4},
+    {"name": "SNOW",   "color": (255, 250, 250), "voxel_id": 5},
+    {"name": "LEAVES", "color": (0, 128, 0),     "voxel_id": 6},
+    {"name": "WOOD",   "color": (139, 69, 19),   "voxel_id": 7},
+]
+
+class RadialMenu:
+    def __init__(self):
+        self.active = False
+        self.center = (0, 0)
+        self.selected_index = -1
+        self.options = RADIAL_MENU_OPTIONS
+
+    def activate(self, center):
+        self.active = True
+        self.center = center
+        self.selected_index = -1
+
+    def deactivate(self):
+        self.active = False
+
+    def update_selection(self, hand_pos):
+        """Compute selected sector based on angle from center."""
+        if not self.active:
+            return
+        dx = hand_pos[0] - self.center[0]
+        dy = hand_pos[1] - self.center[1]
+        dist = math.hypot(dx, dy)
+        if dist < 30:  # too close to center → no selection
+            self.selected_index = -1
+            return
+        angle = math.atan2(dy, dx)  # -π to π
+        if angle < 0:
+            angle += 2 * math.pi
+        n = len(self.options)
+        sector = int(angle / (2 * math.pi / n))
+        self.selected_index = sector % n
+
+    def draw(self, surface):
+        if not self.active:
+            return
+        cx, cy = self.center
+        n = len(self.options)
+
+        # Draw semi-transparent background circle (glass effect)
+        bg_surface = pg.Surface((RADIAL_MENU_RADIUS*2, RADIAL_MENU_RADIUS*2), pg.SRCALPHA)
+        pg.draw.circle(bg_surface, (30, 30, 30, 160), (RADIAL_MENU_RADIUS, RADIAL_MENU_RADIUS), RADIAL_MENU_RADIUS)
+        surface.blit(bg_surface, (cx - RADIAL_MENU_RADIUS, cy - RADIAL_MENU_RADIUS))
+
+        # Draw sectors
+        for i, option in enumerate(self.options):
+            start_angle = i * (2 * math.pi / n)
+            end_angle = (i + 1) * (2 * math.pi / n)
+            color = option["color"]
+            if i == self.selected_index:
+                color = (255, 255, 0)  # highlight
+
+            # Draw filled sector with transparency
+            points = [(cx, cy)]
+            for t in range(0, 11):
+                angle = start_angle + (end_angle - start_angle) * (t / 10)
+                x = cx + math.cos(angle) * RADIAL_MENU_RADIUS
+                y = cy + math.sin(angle) * RADIAL_MENU_RADIUS
+                points.append((x, y))
+            pg.draw.polygon(surface, color + (180,), points)  # add alpha
+
+            # Draw label at mid-angle
+            mid_angle = (start_angle + end_angle) / 2
+            label_x = cx + math.cos(mid_angle) * (RADIAL_MENU_RADIUS * 0.6)
+            label_y = cy + math.sin(mid_angle) * (RADIAL_MENU_RADIUS * 0.6)
+            font = pg.font.SysFont('Consolas', 14, bold=True)
+            text_surf = font.render(option["name"], True, (255, 255, 255))
+            text_rect = text_surf.get_rect(center=(label_x, label_y))
+            surface.blit(text_surf, text_rect)
+
+        # Draw outer circle
+        pg.draw.circle(surface, (200, 200, 200, 200), (cx, cy), RADIAL_MENU_RADIUS, 2)
+        pg.draw.circle(surface, (100, 100, 100, 150), (cx, cy), RADIAL_MENU_RADIUS-2, 1)
+
+
 class HUD:
     def __init__(self, engine):
         self.engine = engine
         self.ctx = engine.ctx
         self.res = (int(WIN_RES[0]), int(WIN_RES[1]))
-        self.visible = True  # DEPTH INTEGRATION: toggleable HUD
+        self.visible = True
         
         self.surface = pg.Surface(self.res, pg.SRCALPHA)
         pg.font.init()
@@ -43,6 +129,7 @@ class HUD:
         self.vao = self.ctx.vertex_array(self.program, [(self.vbo, '2f 2f', 'in_position', 'in_uv')])
         
         self.pulse_timer = 0.0
+        self.radial_menu = RadialMenu()
 
     def draw_text(self, text, x, y, color, font=None, shadow=True):
         if not self.visible: return
@@ -119,16 +206,29 @@ class HUD:
         # Status strings
         l_status = "L-HAND STANDBY"
         r_status = "R-HAND AIMING"
-       # Inside update_surface()
         if left_pinch and right_pinch:
             l_status = r_status = "ZOOMING WORLD"
             l_color = r_color = (255, 150, 255)
         else:
-            l_status = "ROTATING WORLD" if left_pinch else "L-HAND STANDBY"
-            r_status = "BUILDING" if right_pinch else "R-HAND AIMING"
+            if ar.two_finger_up_left_active:
+                l_status = "ROTATE WORLD"
+                l_color = (100, 200, 255)
+            elif ar.pinch_active_left:
+                if ar.radial_menu_active:
+                    l_status = "MENU"
+                    l_color = (255, 200, 0)
+                else:
+                    # Pinching but not yet held
+                    l_status = "HOLD TO MENU"
+                    l_color = (255, 180, 50)
+            else:
+                l_status = "STANDBY"
+                l_color = (150, 150, 150)
+            r_status = "CAMERA LOOK" if ar.two_finger_up_right_active else "R-HAND AIMING"
             l_color = (255, 180, 50) if left_pinch else (50, 200, 255)
             r_color = (100, 255, 100) if right_pinch else (255, 100, 100)
 
+        
         # Camera feed
         if hasattr(ar.ar, 'image') and ar.ar.image is not None:
             cam_surf = ar.ar.image
@@ -138,21 +238,26 @@ class HUD:
             self.surface.blit(cam_surf, pip_rect)
             self.draw_text("AR OPTICAL FEED", pip_rect.x + 5, pip_rect.y - 25, (200, 200, 200))
 
-        # Left hand
+        # Left hand crosshair
         if left_pos is not None:
-            # self.draw_skeleton(l_landmarks, l_color, left_pinch)
             px, py = self.get_screen_coords(left_pos)
             self.draw_crosshair(px, py, l_color, left_pinch, l_status)
             self.draw_text(f"Z: {left_pos.z:.2f}", px + 25, py - 15, (200, 200, 200))
 
-        # Right hand
+        # Right hand crosshair
         if right_pos is not None:
-            # self.draw_skeleton(r_landmarks, r_color, right_pinch)
             px, py = self.get_screen_coords(right_pos)
             self.draw_crosshair(px, py, r_color, right_pinch, r_status)
             self.draw_text(f"Z: {right_pos.z:.2f}", px + 25, py - 30, (200, 200, 200))
             if right_pinch and voxel_handler.is_dragging:
                 self.draw_text(f"BRUSH x{voxel_handler.brush_mult:.2f}", px + 25, py - 45, (255, 255, 0))
+
+
+        # Draw radial menu if active (left hand)
+        if ar.radial_menu_active and ar.smooth_left_pos is not None:
+            hand_screen = (ar.smooth_left_pos.x * WIN_RES[0], ar.smooth_left_pos.y * WIN_RES[1])
+            self.radial_menu.update_selection(hand_screen)
+            self.radial_menu.draw(self.surface)
 
         # Left panel
         left_tracking = f'ACTIVE : {ar._hand_type_left}' if left_pos else "LOST"

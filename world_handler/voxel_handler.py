@@ -1,3 +1,4 @@
+# voxel_handler.py
 import pygame as pg
 import glm
 import math
@@ -31,8 +32,8 @@ class VoxelHandler:
         self.last_ar_mouse_pos = None
 
         # --- DEPTH INTEGRATION: brush multiplier ---
-        self.brush_mult = 1.0                     # current multiplier (applied to movement)
-        self.drag_start_depth = None               # right hand depth at drag start
+        self.brush_mult = 1.0
+        self.drag_start_depth = None
 
     def update(self):
         self.handle_input()
@@ -93,6 +94,7 @@ class VoxelHandler:
                     self.brush_mult = 1.0
                 else:
                     self.drag_start_depth = None
+                get_logger_info('DEBUG', f'Drag START at {self.place_pos}')
 
         # 2. DURING DRAG
         elif mouse_pressed and self.is_dragging:
@@ -102,14 +104,11 @@ class VoxelHandler:
                 # --- Depth scaling: speed factor ---
                 speed_factor = 1.0
                 if current_depth is not None:
-                    # Map depth 0..1 to factor Z_DRAG_SPEED_MIN..Z_DRAG_SPEED_MAX (from settings)
                     speed_factor = max(Z_DRAG_SPEED_MIN, min(Z_DRAG_SPEED_MAX, 1.0 + (current_depth - 0.5) * 1.5))
 
                 # --- Depth delta: brush multiplier ---
                 if self.drag_start_depth is not None and current_depth is not None:
                     delta_z = current_depth - self.drag_start_depth
-                    # Adjust brush multiplier: moving in (negative delta) decreases multiplier? Or increases?
-                    # Let's define: moving hand forward (closer) = smaller brush (more precision)
                     self.brush_mult = 1.0 + delta_z * RIGHT_BRUSH_SENSITIVITY
                     self.brush_mult = max(BRUSH_MULT_MIN, min(BRUSH_MULT_MAX, self.brush_mult))
 
@@ -259,13 +258,19 @@ class VoxelHandler:
     # ==========================================
 
     def set_voxel(self):
-        """Triggered by single clicks."""
-        if self.is_dragging: return
-            
-        if self.interaction_mode:
-            self.add_voxel()
+        """Triggered by single clicks (quick pinch)."""
+        if self.is_dragging:
+            get_logger_info('DEBUG', 'set_voxel ignored: dragging')
+            return
+
+        if self.voxel_id:
+            get_logger_info('DEBUG', f'set_voxel: mode {"ADD" if self.interaction_mode else "REMOVE"} at {self.voxel_world_pos}')
+            if self.interaction_mode:
+                self.add_voxel()
+            else:
+                self.remove_voxel()
         else:
-            self.remove_voxel()
+            get_logger_info('DEBUG', 'set_voxel: no voxel targeted')
 
     def add_voxel(self):
         if self.voxel_id:
@@ -285,12 +290,16 @@ class VoxelHandler:
                 chunk.mesh.rebuild()
                 if chunk.is_empty: chunk.is_empty = False
                 self._rebuild_adj_for_pos(voxel_local_pos, pos)
+                get_logger_info('DEBUG', f'Placed block {self.new_voxel_id} at {pos}')
+        else:
+            get_logger_info('DEBUG', f'Cannot place block at {pos}: space occupied')
 
     def remove_voxel(self):
         if self.voxel_id:
             self.chunk.voxels[int(self.voxel_index)] = 0
             self.chunk.mesh.rebuild()
             self._rebuild_adj_for_pos(self.voxel_local_pos, self.voxel_world_pos)
+            get_logger_info('DEBUG', f'Removed block at {self.voxel_world_pos}')
 
     def switch_mode(self):
         self.interaction_mode = not self.interaction_mode
