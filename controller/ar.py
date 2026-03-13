@@ -1,71 +1,11 @@
 # scripts/ar.py
-from scripts.arconfig import *
+from configs.arconfig import *
 import math
 import cv2
 import pygame
 import numpy as np
 import mediapipe as mp
-from collections import deque, namedtuple
-
-# --- PINCH DETECTOR (unchanged, uses 2D) ---
-HandState = namedtuple("HandState", ["pos_hist", "pinch_count", "is_pinched"])
-
-class PinchDetector:
-    def __init__(self):
-        self.hands = {
-            "LEFT":  HandState(deque(maxlen=HISTOGRAM_SIZE), 0, False),
-            "RIGHT": HandState(deque(maxlen=HISTOGRAM_SIZE), 0, False),
-        }
-
-    @staticmethod
-    def euclid(a, b):
-        dx = b[0] - a[0]
-        dy = b[1] - a[1]
-        return math.hypot(dx, dy)
-
-    def update(self, label, landmarks_norm):
-        state = self.hands[label]
-        state.pos_hist.append(landmarks_norm)
-
-        p_thumb = landmarks_norm[THUMB_TIP_IDX]
-        p_index = landmarks_norm[INDEX_TIP_IDX]
-        p_wrist = landmarks_norm[WRIST_IDX]
-        p_mcp   = landmarks_norm[MIDDLE_MCP_IDX]
-
-        raw_dist   = self.euclid(p_thumb, p_index)
-        hand_scale = self.euclid(p_wrist, p_mcp)
-        rel_dist   = raw_dist / hand_scale if hand_scale > 0 else float('inf')
-
-        pc, pinched = state.pinch_count, state.is_pinched
-
-        if pinched:
-            if rel_dist > PINCH_OFF_THRESH:
-                pc -= 1
-        else:
-            if rel_dist < PINCH_ON_THRESH:
-                pc += 1
-
-        pc = max(-PINCH_FRAMES_REQ, min(PINCH_FRAMES_REQ, pc))
-
-        if not pinched and pc >= PINCH_FRAMES_REQ:
-            pinched = True
-        elif pinched and pc <= -PINCH_FRAMES_REQ:
-            pinched = False
-
-        self.hands[label] = HandState(state.pos_hist, pc, pinched)
-
-        return {
-            "raw_dist":  raw_dist,
-            "scale":     hand_scale,
-            "rel_dist":  rel_dist,
-            "is_pinched": pinched
-        }
-
-    def reset(self, label):
-        if label in self.hands:
-            state = self.hands[label]
-            self.hands[label] = HandState(state.pos_hist, 0, False)
-
+from collections import deque
 
 # --- AR CLASS (3D) ---
 class AR:
@@ -95,8 +35,6 @@ class AR:
         self.pinch_absent_reset = max(3, HISTOGRAM_SIZE // 2)
         
         # --- GHOST KINEMATICS & TTL ---
-        # Velocity is a 6‑element list: [vx, vy, vz, ax, ay, az]
-        # where (ax, ay, az) is rotation axis * angle per frame.
         self.ghost_velocity = {'LEFT': [0.0]*6, 'RIGHT': [0.0]*6}
         self.KINEMATIC_FRICTION = 0.85 
         self.MAX_GHOST_TTL = 15  
@@ -104,26 +42,22 @@ class AR:
         self.ghost_ttl_counter = {'LEFT': 0, 'RIGHT': 0}
         self.ghost_age_default = 2
         
-        # --- OPTICAL FLOW (still 2D pixel tracking) ---
+        # --- OPTICAL FLOW (2D pixel tracking) ---
         self.prev_gray = None
         self.lk_params = dict(
             winSize=(25, 25), 
             maxLevel=3,
             criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03)
         )
-        # Stores pixel coordinates of wrist and middle MCP
         self.lk_tracked_points = {'LEFT': None, 'RIGHT': None}
 
-        self.detector = PinchDetector()
         self.frame_count = 0
 
-        # ar_data now contains 3D points (normalized)
+        # ar_data now contains only 3D points, hand type, and scale
         self.ar_data = {
             "POSITION_DATA": {"LEFT": [], "RIGHT": []},   # list of (x,y,z)
             "SCALE":         {"LEFT": 1,    "RIGHT": 1},
             "FRAME_TYPE":    {"LEFT" : "REAL", "RIGHT" : "REAL"},
-            "CLICK_DIST":    {"LEFT": 0,    "RIGHT": 0},
-            "CLICK_FLAG":    {"LEFT": False,"RIGHT": False},
             "HAND_PRESENCE" : False
         }
         self.image = None
@@ -135,6 +69,7 @@ class AR:
     def _log(self, level, msg, force=False):
         if not self.debug and not force:
             return
+        from scripts.logger import get_logger_info
         get_logger_info(level, msg)
 
     # ------------------------------------------------------------------
@@ -165,7 +100,6 @@ class AR:
                 pts.append((0.0, 0.0, 0.0))
                 continue
 
-            # For both real and ghost, keep normalized coordinates.
             pts.append((lx, ly, lz))
 
         entry = {
@@ -208,7 +142,7 @@ class AR:
         return pts
 
     # ------------------------------------------------------------------
-    # Ghost pruning by age
+    # Ghost pruning by age (unchanged)
     # ------------------------------------------------------------------
     def _prune_ghosts_by_age(self, label):
         hist = self.position_histogram[label]
@@ -246,7 +180,7 @@ class AR:
         return ang
 
     # ------------------------------------------------------------------
-    # 3D geometry helpers
+    # 3D geometry helpers (unchanged)
     # ------------------------------------------------------------------
     def _normalize(self, v):
         length = math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2])
@@ -263,11 +197,6 @@ class AR:
         return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]
 
     def _rotate_point(self, p, center, axis_angle):
-        """
-        Rotate point p around center by rotation given as axis * angle.
-        axis_angle is a 3-tuple (ax, ay, az) where length = angle (radians).
-        Uses Rodrigues' rotation formula.
-        """
         angle = math.sqrt(axis_angle[0]**2 + axis_angle[1]**2 + axis_angle[2]**2)
         if angle < 1e-6:
             return p
@@ -275,7 +204,6 @@ class AR:
         ay = axis_angle[1] / angle
         az = axis_angle[2] / angle
 
-        # Translate point relative to center
         px = p[0] - center[0]
         py = p[1] - center[1]
         pz = p[2] - center[2]
@@ -294,12 +222,6 @@ class AR:
         return (rx + center[0], ry + center[1], rz + center[2])
 
     def _compute_hand_orientation(self, pts):
-        """
-        Compute orientation features from hand landmarks.
-        Returns:
-          - hand_dir: unit vector from wrist to middle MCP (main hand direction)
-          - hand_normal: approximate palm normal (using wrist, index MCP, pinky MCP)
-        """
         wrist = pts[WRIST_IDX]
         mcp_mid = pts[MIDDLE_MCP_IDX]
         hand_dir = (mcp_mid[0]-wrist[0], mcp_mid[1]-wrist[1], mcp_mid[2]-wrist[2])
@@ -314,20 +236,15 @@ class AR:
         if norm_len > 0:
             normal = (normal[0]/norm_len, normal[1]/norm_len, normal[2]/norm_len)
         else:
-            normal = (0.0, 1.0, 0.0)  # fallback
+            normal = (0.0, 1.0, 0.0)
         return hand_dir, normal
 
     # ------------------------------------------------------------------
-    # 3D velocity estimation
+    # 3D velocity estimation (unchanged)
     # ------------------------------------------------------------------
     def calculate_velocity(self, label, dir=0, window=4):
-        """
-        Compute 3D linear velocity (dx, dy, dz) and angular velocity as axis*angle.
-        Returns a 6-element list [vx, vy, vz, ax, ay, az] if dir==1,
-        otherwise returns linear speed as a float.
-        """
         hist = self.position_histogram[label]
-        valid = []  # list of (wrist_pt, hand_dir, hand_normal, frame)
+        valid = []
         frames = []
         for e in reversed(hist):
             if e.get("source") != self.SOURCE_REAL:
@@ -346,7 +263,7 @@ class AR:
             return [0.0]*6 if dir else 0.0
 
         lin_vels = []
-        ang_vels = []  # each element is a 3-tuple (axis*angle)
+        ang_vels = []
 
         for i in range(len(valid) - 1):
             (w_new, d_new, n_new) = valid[i]
@@ -354,13 +271,11 @@ class AR:
             f_new = frames[i]; f_old = frames[i + 1]
             df = max(1, f_new - f_old)
 
-            # Linear velocity
             vx = (w_new[0] - w_old[0]) / df
             vy = (w_new[1] - w_old[1]) / df
             vz = (w_new[2] - w_old[2]) / df
             lin_vels.append((vx, vy, vz))
 
-            # Angular velocity from direction change
             axis1 = self._cross(d_old, d_new)
             sin_angle1 = math.sqrt(axis1[0]**2 + axis1[1]**2 + axis1[2]**2)
             cos_angle1 = self._dot(d_old, d_new)
@@ -368,9 +283,8 @@ class AR:
             if sin_angle1 > 0:
                 axis1 = (axis1[0]/sin_angle1, axis1[1]/sin_angle1, axis1[2]/sin_angle1)
             else:
-                axis1 = (0.0, 1.0, 0.0)  # arbitrary
+                axis1 = (0.0, 1.0, 0.0)
 
-            # Angular velocity from normal change
             axis2 = self._cross(n_old, n_new)
             sin_angle2 = math.sqrt(axis2[0]**2 + axis2[1]**2 + axis2[2]**2)
             cos_angle2 = self._dot(n_old, n_new)
@@ -380,7 +294,6 @@ class AR:
             else:
                 axis2 = axis1
 
-            # Combine (simple average of axis*angle)
             ang_vel = ((axis1[0]*angle1 + axis2[0]*angle2) * 0.5,
                        (axis1[1]*angle1 + axis2[1]*angle2) * 0.5,
                        (axis1[2]*angle1 + axis2[2]*angle2) * 0.5)
@@ -395,7 +308,7 @@ class AR:
         avg_az = sum(a[2] for a in ang_vels) / len(ang_vels)
 
         # Clamp angular speed
-        MAX_ANGULAR = 0.5  # radians per frame
+        MAX_ANGULAR = 0.5
         ang_speed = math.sqrt(avg_ax**2 + avg_ay**2 + avg_az**2)
         if ang_speed > MAX_ANGULAR:
             scale = MAX_ANGULAR / ang_speed
@@ -403,7 +316,7 @@ class AR:
             avg_ay *= scale
             avg_az *= scale
 
-        # Clamp linear speed (in normalized units per frame)
+        # Clamp linear speed
         MAX_SPEED_NORM = 0.1
         lin_speed = math.sqrt(avg_vx**2 + avg_vy**2 + avg_vz**2)
         if lin_speed > MAX_SPEED_NORM:
@@ -431,7 +344,7 @@ class AR:
         return None
 
     # ------------------------------------------------------------------
-    # Ghost generation helpers
+    # Ghost generation helpers (unchanged)
     # ------------------------------------------------------------------
     def _normalize_ghost_genframes(self, label):
         hist = self.position_histogram.get(label, [])
@@ -459,15 +372,6 @@ class AR:
         self.lk_tracked_points[a_label], self.lk_tracked_points[b_label] = \
             self.lk_tracked_points[b_label], self.lk_tracked_points[a_label]
 
-        if a_label in self.detector.hands and b_label in self.detector.hands:
-            ha = self.detector.hands[a_label]
-            hb = self.detector.hands[b_label]
-            self.detector.hands[a_label], self.detector.hands[b_label] = hb, ha
-        else:
-            for L in (a_label, b_label):
-                if L not in self.detector.hands:
-                    self.detector.hands[L] = HandState(deque(maxlen=HISTOGRAM_SIZE), 0, False)
-        
         self._normalize_ghost_genframes(a_label)
         self._normalize_ghost_genframes(b_label)
 
@@ -487,7 +391,7 @@ class AR:
         return streak
 
     # ------------------------------------------------------------------
-    # Handedness reconciliation (unchanged, uses pixel coordinates)
+    # Handedness reconciliation (unchanged)
     # ------------------------------------------------------------------
     def _reconcile_handedness(self, detections):
         if not detections:
@@ -501,7 +405,6 @@ class AR:
             "LEFT": self._last_real_wrist("LEFT"),
             "RIGHT": self._last_real_wrist("RIGHT")
         }
-        # Convert tracked wrists to pixel coordinates for distance calculation
         tracked_px = {}
         for label, pos_norm in tracked.items():
             if pos_norm is not None:
@@ -599,7 +502,7 @@ class AR:
         detections[:] = valid_detections
 
     # ------------------------------------------------------------------
-    # Ghost frame generator (3D)
+    # Ghost frame generator (3D) (unchanged)
     # ------------------------------------------------------------------
     def generate_frames(self, velocity, label):
         hist = self.position_histogram[label]
@@ -708,8 +611,6 @@ class AR:
             "POSITION_DATA": {"LEFT": [], "RIGHT": []},
             "SCALE":         {"LEFT": 1,    "RIGHT": 1},
             "FRAME_TYPE":    {"LEFT" : "REAL", "RIGHT" : "REAL"},
-            "CLICK_DIST":    {"LEFT": 0,    "RIGHT": 0},
-            "CLICK_FLAG":    {"LEFT": False,"RIGHT": False},
             "HAND_PRESENCE" : False
         }
 
@@ -741,10 +642,10 @@ class AR:
 
                 # Get 3D normalized landmarks
                 landmarks_norm = [(lm.x, lm.y, lm.z) for lm in lm_set.landmark]
-                d = self.detector.update(label, [(lm.x, lm.y) for lm in lm_set.landmark])  # pinch uses 2D
 
                 if self.presence_counter[label] < self.presence_threshold_on:
-                    d["is_pinched"] = False
+                    # not yet stable, but we still store landmarks
+                    pass
 
                 pts = self.calculate_hand_points(lm_set, label, is_generated=False)
                 
@@ -760,11 +661,19 @@ class AR:
                 except Exception:
                     pass
 
+                # Compute hand scale (still useful for other purposes)
+                hand_scale = 1.0
+                if len(landmarks_norm) > MIDDLE_MCP_IDX:
+                    p_wrist = landmarks_norm[WRIST_IDX]
+                    p_mcp = landmarks_norm[MIDDLE_MCP_IDX]
+                    sx = p_mcp[0] - p_wrist[0]
+                    sy = p_mcp[1] - p_wrist[1]
+                    sz = p_mcp[2] - p_wrist[2]
+                    hand_scale = math.sqrt(sx*sx + sy*sy + sz*sz) or 1.0
+
                 ar_data["POSITION_DATA"][label] = pts
                 ar_data["FRAME_TYPE"][label] = "REAL"
-                ar_data["SCALE"][label] = d["scale"]
-                ar_data["CLICK_DIST"][label] = d["rel_dist"]
-                ar_data["CLICK_FLAG"][label] = d["is_pinched"]
+                ar_data["SCALE"][label] = hand_scale
 
                 self.hands_tracker[label] = 0
 
@@ -789,7 +698,7 @@ class AR:
                 if self.ghost_ttl_counter[label] > 0 and self.hands_tracker[label] < self.absent_reset_threshold:
                     flow_success = False
                     
-                    # Attempt optical flow (2D pixel tracking → 3D estimate)
+                    # Attempt optical flow
                     if self.lk_tracked_points[label] is not None and self.prev_gray is not None:
                         p1, st, err = cv2.calcOpticalFlowPyrLK(
                             self.prev_gray, current_gray, self.lk_tracked_points[label], None, **self.lk_params
@@ -806,7 +715,7 @@ class AR:
                             old_dist_px = math.hypot(p0[1][0]-p0[0][0], p0[1][1]-p0[0][1])
                             new_dist_px = math.hypot(p1_flat[1][0]-p1_flat[0][0], p1_flat[1][1]-p1_flat[0][1])
                             scale_factor = new_dist_px / old_dist_px if old_dist_px > 0 else 1.0
-                            dz_norm = -(scale_factor - 1.0) * 0.1   # heuristic depth change
+                            dz_norm = -(scale_factor - 1.0) * 0.1
                             
                             v_old = (p0[1][0]-p0[0][0], p0[1][1]-p0[0][1])
                             v_new = (p1_flat[1][0]-p1_flat[0][0], p1_flat[1][1]-p1_flat[0][1])
@@ -815,7 +724,7 @@ class AR:
                                 angle2d = math.atan2(v_new[1], v_new[0]) - math.atan2(v_old[1], v_old[0])
                                 angle2d = self._normalize_angle(angle2d)
                             
-                            vel = [dx_norm, dy_norm, dz_norm, 0.0, 0.0, angle2d]  # rotation around camera forward
+                            vel = [dx_norm, dy_norm, dz_norm, 0.0, 0.0, angle2d]
                             ghost = self.generate_frames(vel, label)
                             self.ghost_velocity[label] = vel 
                             self.lk_tracked_points[label] = p1
@@ -855,10 +764,6 @@ class AR:
                             self._log('CORE', f'GHOST EXPIRED: Wiping spatial memory for {label}', True)
                             self.position_histogram[label].clear()
                             self.lk_tracked_points[label] = None
-                            try:
-                                self.detector.reset(label)
-                            except Exception:
-                                pass
                 
                 if ghost_pts and len(ghost_pts) > 0:
                     ar_data["FRAME_TYPE"][label] = "GHOST"
@@ -867,10 +772,7 @@ class AR:
                     ar_data["FRAME_TYPE"][label] = "REAL" 
                     ar_data["POSITION_DATA"][label] = []
                     
-                last_pinch_state = self.detector.hands[label].is_pinched if label in self.detector.hands else False
-                ar_data["CLICK_FLAG"][label] = last_pinch_state
-                ar_data["CLICK_DIST"][label] = 0
-                ar_data["SCALE"][label] = 1
+                ar_data["SCALE"][label] = 1.0
 
         ar_data["HAND_PRESENCE"] = any(self.presence_counter[label] >= self.presence_threshold_on for label in ("LEFT","RIGHT"))
 

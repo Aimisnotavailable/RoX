@@ -2,11 +2,11 @@ from settings import *
 import moderngl as mgl
 import pygame as pg
 import sys
-from shader_program import ShaderProgram
-from scene import Scene
-from player import Player
-from textures import Textures
-from arcontroller import ARController
+from renderer.shader_program import ShaderProgram
+from renderer.scene import Scene
+from player.player import Player
+from utils.textures import Textures
+from controller.arcontroller import ARController
 
 
 class VoxelEngine:

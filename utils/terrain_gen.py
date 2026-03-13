@@ -1,4 +1,4 @@
-from noise import noise2, noise3
+from utils.noise import noise2, noise3
 from random import random
 from settings import *
 

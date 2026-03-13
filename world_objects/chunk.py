@@ -1,7 +1,7 @@
 from settings import *
 from meshes.chunk_mesh import ChunkMesh
 import random
-from terrain_gen import *
+from utils.terrain_gen import *
 
 
 class Chunk:

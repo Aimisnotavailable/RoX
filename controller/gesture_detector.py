@@ -1,7 +1,7 @@
 # gesture_detector.py
 from abc import ABC, abstractmethod
 import math
-from controller.arconfig import (
+from configs.arconfig import (
     THUMB_TIP_IDX, INDEX_TIP_IDX, INDEX_MCP_IDX, MIDDLE_MCP_IDX,
     PINKY_MCP_IDX, WRIST_IDX, PINCH_ON_THRESH, PINCH_OFF_THRESH,
     PINCH_FRAMES_REQ

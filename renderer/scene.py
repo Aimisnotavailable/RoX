@@ -1,12 +1,12 @@
 # scene.py
 from settings import *
 import moderngl as mgl
-from world import World
+from world_handler.world import World
 from world_objects.voxel_marker import VoxelMarker
 from world_objects.water import Water
 from world_objects.clouds import Clouds
 
-from hud import HUD
+from utils.hud import HUD
 from world_objects.hand_renderer import HandRenderer
 
 class Scene:

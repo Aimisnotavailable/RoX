@@ -1,6 +1,6 @@
 from settings import *
 from meshes.base_mesh import BaseMesh
-from noise import *
+from utils.noise import *
 
 
 class CloudMesh(BaseMesh):

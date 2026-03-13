@@ -1,7 +1,7 @@
 from settings import *
 from world_objects.chunk import Chunk
-from voxel_handler import VoxelHandler
-from world_data_handler import save_world, load_chunk_by_index
+from world_handler.voxel_handler import VoxelHandler
+from world_handler.world_data_handler import save_world, load_chunk_by_index
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
