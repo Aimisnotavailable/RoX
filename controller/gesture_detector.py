@@ -13,6 +13,7 @@ RING_TIP_IDX = 16
 RING_MCP_IDX = 13
 PINKY_TIP_IDX = 20
 PINKY_MCP_IDX = 17
+THUMB_MCP_IDX = 2
 
 class GestureEvent:
     def __init__(self, hand, gesture_name, event_type, value=None):
@@ -152,18 +153,82 @@ class TwoFingerUpDetector(BaseGestureDetector):
         dy = index_tip[1] - thumb_tip[1]
         dz = index_tip[2] - thumb_tip[2]
         pinch_dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-        # Hand scale for normalization
         sx = middle_mcp[0] - wrist[0]
         sy = middle_mcp[1] - wrist[1]
         sz = middle_mcp[2] - wrist[2]
         hand_scale = math.sqrt(sx*sx + sy*sy + sz*sz) or 1.0
         rel_pinch_dist = pinch_dist / hand_scale
-        if rel_pinch_dist < 0.4:  # threshold to avoid pinch
+        if rel_pinch_dist < 0.4:
             return False, None
 
         avg_x = (index_tip[0] + middle_tip[0]) / 2.0
         avg_y = (index_tip[1] + middle_tip[1]) / 2.0
         return True, (avg_x, avg_y)
+
+
+class OpenPalmDetector(BaseGestureDetector):
+    def __init__(self, hand_label, hold_frames=None):
+        super().__init__(hand_label, 'open_palm', hold_frames)
+
+    def _compute_raw_state(self, landmarks):
+        if len(landmarks) < 21:
+            return False, None
+
+        wrist = landmarks[WRIST_IDX]
+        # All five finger tips above their respective MCPs and above wrist
+        tips = [THUMB_TIP_IDX, INDEX_TIP_IDX, MIDDLE_TIP_IDX, RING_TIP_IDX, PINKY_TIP_IDX]
+        mcps = [THUMB_MCP_IDX, INDEX_MCP_IDX, MIDDLE_MCP_IDX, RING_MCP_IDX, PINKY_MCP_IDX]
+
+        for tip_idx, mcp_idx in zip(tips, mcps):
+            tip = landmarks[tip_idx]
+            mcp = landmarks[mcp_idx]
+            if tip[1] >= mcp[1] or tip[1] >= wrist[1]:
+                return False, None
+
+        # Optionally check thumb not too close to index to exclude pinch
+        thumb_tip = landmarks[THUMB_TIP_IDX]
+        index_tip = landmarks[INDEX_TIP_IDX]
+        dx = thumb_tip[0] - index_tip[0]
+        dy = thumb_tip[1] - index_tip[1]
+        dz = thumb_tip[2] - index_tip[2]
+        dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+        sx = landmarks[MIDDLE_MCP_IDX][0] - wrist[0]
+        sy = landmarks[MIDDLE_MCP_IDX][1] - wrist[1]
+        sz = landmarks[MIDDLE_MCP_IDX][2] - wrist[2]
+        hand_scale = math.sqrt(sx*sx + sy*sy + sz*sz) or 1.0
+        rel_dist = dist / hand_scale
+        if rel_dist < 0.4:
+            return False, None
+
+        return True, None
+
+
+class PointDetector(BaseGestureDetector):
+    def __init__(self, hand_label, hold_frames=None):
+        super().__init__(hand_label, 'point', hold_frames)
+
+    def _compute_raw_state(self, landmarks):
+        if len(landmarks) < 21:
+            return False, None
+
+        index_tip = landmarks[INDEX_TIP_IDX]
+        index_mcp = landmarks[INDEX_MCP_IDX]
+        wrist = landmarks[WRIST_IDX]
+
+        # Index extended (tip above MCP and above wrist)
+        index_up = index_tip[1] < index_mcp[1] and index_tip[1] < wrist[1]
+
+        # All other fingers not extended (optional, but helps reduce false positives)
+        other_tips = [MIDDLE_TIP_IDX, RING_TIP_IDX, PINKY_TIP_IDX]
+        others_down = True
+        for tip_idx in other_tips:
+            tip = landmarks[tip_idx]
+            mcp = landmarks[tip_idx - 3]  # approximate MCP index offset (works for middle, ring, pinky)
+            if tip[1] < mcp[1]:
+                others_down = False
+                break
+
+        return index_up and others_down, index_tip
 
 
 class GestureManager:

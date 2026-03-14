@@ -7,7 +7,10 @@ import math
 import numpy as np
 from settings import *
 from controller.ar import AR
-from controller.gesture_detector import GestureManager, PinchDetector, TwoFingerUpDetector
+from controller.gesture_detector import (
+    GestureManager, PinchDetector, TwoFingerUpDetector,
+    OpenPalmDetector, PointDetector
+)
 from scripts.logger import get_logger_info
 
 class ARController:
@@ -20,10 +23,12 @@ class ARController:
         
         # Gesture manager
         self.gesture_manager = GestureManager()
-        self.gesture_manager.add_detector(PinchDetector('LEFT', hold_frames=15))
-        self.gesture_manager.add_detector(PinchDetector('RIGHT', hold_frames=5))
+        self.gesture_manager.add_detector(PinchDetector('LEFT', hold_frames=30))
+        self.gesture_manager.add_detector(PinchDetector('RIGHT', hold_frames=20))
         self.gesture_manager.add_detector(TwoFingerUpDetector('LEFT', hold_frames=None, require_others_down=True))
         self.gesture_manager.add_detector(TwoFingerUpDetector('RIGHT', hold_frames=None, require_others_down=True))
+        self.gesture_manager.add_detector(OpenPalmDetector('LEFT', hold_frames=15))
+        self.gesture_manager.add_detector(PointDetector('LEFT', hold_frames=None))
         
         # Raw data from AR thread
         self._raw_left_landmarks = []
@@ -65,6 +70,10 @@ class ARController:
         
         # Zoom tracking
         self.last_zoom_dist = None
+
+        # Open palm anti‑reopen state
+        self._open_palm_active = False
+        self._open_palm_used_to_close = False
 
         get_logger_info('AR', 'THREAD FOR AR SYSTEM INITIALIZED')
         self.thread = threading.Thread(target=self._tracking_loop, daemon=True)
@@ -108,9 +117,9 @@ class ARController:
         left_tuples = []
         right_tuples = []
 
-        if self.smooth_left_landmarks:
+        if self._hand_type_left == "REAL" and self.smooth_left_landmarks:
             left_tuples = [(v.x, v.y, v.z) for v in self.smooth_left_landmarks]
-        if self.smooth_right_landmarks:
+        if self._hand_type_right == "REAL" and self.smooth_right_landmarks:
             right_tuples = [(v.x, v.y, v.z) for v in self.smooth_right_landmarks]
 
         # Process gestures
@@ -119,18 +128,6 @@ class ARController:
         # Reset pinch flags
         self._raw_left_pinch = False
         self._raw_right_pinch = False
-
-        # # Ghost hand cleanup
-        # if self._hand_type_left != "REAL":
-        #     self.pinch_active_left = False
-        #     self.pinch_hold_emitted['LEFT'] = False
-        #     self.pinch_start_left = None
-        #     self.pinch_current_left = None
-        # if self._hand_type_right != "REAL":
-        #     self.pinch_active_right = False
-        #     self.pinch_hold_emitted['RIGHT'] = False
-        #     self.pinch_start_right = None
-        #     self.pinch_current_right = None
 
         # Handle events
         for ev in events:
@@ -144,18 +141,15 @@ class ARController:
                         self._raw_left_pinch = True
                         self.pinch_hold_emitted['LEFT'] = False
                         self.pinch_start_left = self.smooth_left_pos
-                        if self.radial_menu_active:
-                            self.close_radial_menu()
                     elif ev.event_type == 'UPDATE' and ev.value is not None:
                         self._raw_left_pinch = True
                         self.pinch_current_left = self.smooth_left_pos
                     elif ev.event_type == 'HOLD':
                         self.pinch_hold_emitted['LEFT'] = True
-                        get_logger_info('AR', 'Left pinch HOLD – opening menu')
-                        self.open_radial_menu(self.smooth_left_pos)
                     elif ev.event_type == 'END':
                         if self.radial_menu_active:
-                            self.execute_radial_selection()
+                            # Pinch while menu active does nothing (prevents accidental mode toggle)
+                            pass
                         else:
                             if not self.pinch_hold_emitted['LEFT']:
                                 get_logger_info('DEBUG', 'Left quick pinch – toggling mode')
@@ -216,6 +210,28 @@ class ARController:
                         self.two_finger_up_right_active = False
                         self.two_finger_up_right_pos = None
 
+            elif ev.gesture_name == 'open_palm' and ev.hand == 'LEFT':
+                if ev.event_type == 'START':
+                    self._open_palm_active = True
+                    if self.radial_menu_active:
+                        # Quick open palm while menu active confirms selection and closes menu
+                        self.execute_radial_selection()
+                        self._open_palm_used_to_close = True
+                elif ev.event_type == 'HOLD' and not self.radial_menu_active and not self._open_palm_used_to_close:
+                    # Hold open palm to open menu (only if not used to close recently)
+                    if self.smooth_left_pos is not None:
+                        self.open_radial_menu(self.smooth_left_pos)
+                elif ev.event_type == 'END':
+                    self._open_palm_active = False
+                    self._open_palm_used_to_close = False
+
+            elif ev.gesture_name == 'point' and ev.hand == 'LEFT' and self.radial_menu_active:
+                # Only update selection if not currently pinching (to avoid jitter during mode toggle)
+                if ev.event_type == 'UPDATE' and ev.value is not None and not self.pinch_active_left:
+                    screen_x = ev.value[0] * WIN_RES[0]
+                    screen_y = ev.value[1] * WIN_RES[1]
+                    self.engine.scene.hud.radial_menu.update_selection((screen_x, screen_y))
+
         # Update smoothed positions
         self.smooth_left_pos = self.smooth_left_landmarks[8] if len(self.smooth_left_landmarks) > 8 else None
         self.smooth_right_pos = self.smooth_right_landmarks[8] if len(self.smooth_right_landmarks) > 8 else None
@@ -244,6 +260,19 @@ class ARController:
                 self.last_zoom_dist = None
         else:
             self.last_zoom_dist = None
+
+        # Clean up pinch state for hands that are completely absent (no landmarks and type REAL)
+        # if not self.smooth_left_landmarks and self._hand_type_left == "REAL":
+        #     self.pinch_active_left = False
+        #     self.pinch_hold_emitted['LEFT'] = False
+        #     self.pinch_start_left = None
+        #     self.pinch_current_left = None
+
+        # if not self.smooth_right_landmarks and self._hand_type_right == "REAL":
+        #     self.pinch_active_right = False
+        #     self.pinch_hold_emitted['RIGHT'] = False
+        #     self.pinch_start_right = None
+        #     self.pinch_current_right = None
 
     def open_radial_menu(self, hand_pos):
         if hand_pos is None:

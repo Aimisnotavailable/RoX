@@ -36,11 +36,12 @@ class RadialMenu:
     def deactivate(self):
         self.active = False
 
-    def update_selection(self, hand_pos):
+    def update_selection(self, screen_point):
+        """screen_point is a tuple (x, y) in screen pixels."""
         if not self.active:
             return
-        dx = hand_pos[0] - self.center[0]
-        dy = hand_pos[1] - self.center[1]
+        dx = screen_point[0] - self.center[0]
+        dy = screen_point[1] - self.center[1]
         dist = math.hypot(dx, dy)
         if dist < 40:
             self.selected_index = -1
@@ -227,7 +228,7 @@ class HUD:
             left_color = (80, 180, 255)
         elif left_pinch:
             if ar.radial_menu_active:
-                left_status = "MENU"
+                left_status = "SELECT"
                 left_color = (255, 200, 50)
             else:
                 left_status = "HOLD"
@@ -272,8 +273,7 @@ class HUD:
 
         # Radial menu
         if ar.radial_menu_active and left_pos is not None:
-            hand_screen = (left_pos.x * WIN_RES[0], left_pos.y * WIN_RES[1])
-            self.radial_menu.update_selection(hand_screen)
+            # Menu is drawn by the radial_menu object itself
             self.radial_menu.draw(self.surface, self.pulse_timer)
 
         # ---- Top left system panel - larger, centered text ----
