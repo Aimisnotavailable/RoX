@@ -108,10 +108,10 @@ class ARController:
         left_tuples = []
         right_tuples = []
 
-        # if self._hand_type_left == "REAL" and self.smooth_left_landmarks:
-        #     left_tuples = [(v.x, v.y, v.z) for v in self.smooth_left_landmarks]
-        # if self._hand_type_right == "REAL" and self.smooth_right_landmarks:
-        #     right_tuples = [(v.x, v.y, v.z) for v in self.smooth_right_landmarks]
+        if self.smooth_left_landmarks:
+            left_tuples = [(v.x, v.y, v.z) for v in self.smooth_left_landmarks]
+        if self.smooth_right_landmarks:
+            right_tuples = [(v.x, v.y, v.z) for v in self.smooth_right_landmarks]
 
         # Process gestures
         events = self.gesture_manager.process_both(left_tuples, right_tuples, now)
