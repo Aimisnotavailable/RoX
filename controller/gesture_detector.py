@@ -1,4 +1,4 @@
-# gesture_detector.py
+# controller/gesture_detector.py
 from abc import ABC, abstractmethod
 import math
 from configs.arconfig import (
@@ -15,19 +15,17 @@ PINKY_TIP_IDX = 20
 PINKY_MCP_IDX = 17
 
 class GestureEvent:
-    """Simple event container emitted by detectors."""
     def __init__(self, hand, gesture_name, event_type, value=None):
-        self.hand = hand          # 'LEFT' or 'RIGHT'
-        self.gesture_name = gesture_name  # e.g., 'pinch', 'two_finger_up'
-        self.event_type = event_type      # 'START', 'UPDATE', 'END', 'HOLD'
-        self.value = value                # optional data
+        self.hand = hand
+        self.gesture_name = gesture_name
+        self.event_type = event_type
+        self.value = value
 
     def __repr__(self):
         return f"GestureEvent({self.hand}, {self.gesture_name}, {self.event_type}, {self.value})"
 
 
 class BaseGestureDetector(ABC):
-    """Abstract base for all gesture detectors."""
     def __init__(self, hand_label, gesture_name, hold_frames=None):
         self.hand = hand_label
         self.gesture_name = gesture_name
@@ -42,11 +40,6 @@ class BaseGestureDetector(ABC):
 
     @abstractmethod
     def _compute_raw_state(self, landmarks):
-        """
-        Return (raw_active, value) based on current landmarks.
-        raw_active: boolean indicating if gesture condition is met.
-        value: any numeric data (e.g., pinch ratio) for UPDATE events.
-        """
         pass
 
     def process(self, landmarks, current_time):
@@ -71,29 +64,24 @@ class BaseGestureDetector(ABC):
                 self._active_frames = 0
                 self._hold_emitted = False
                 self._start_time = current_time
-                events.append(GestureEvent(self.hand, self.gesture_name,
-                                           'START', value))
+                events.append(GestureEvent(self.hand, self.gesture_name, 'START', value))
             else:
-                events.append(GestureEvent(self.hand, self.gesture_name,
-                                           'END', self._value))
+                events.append(GestureEvent(self.hand, self.gesture_name, 'END', self._value))
             self.active = new_active
 
         if self.active:
             self._active_frames += 1
             self._value = value
-            events.append(GestureEvent(self.hand, self.gesture_name,
-                                       'UPDATE', value))
+            events.append(GestureEvent(self.hand, self.gesture_name, 'UPDATE', value))
 
             if self.hold_frames and self._active_frames >= self.hold_frames and not self._hold_emitted:
-                events.append(GestureEvent(self.hand, self.gesture_name,
-                                           'HOLD', value))
+                events.append(GestureEvent(self.hand, self.gesture_name, 'HOLD', value))
                 self._hold_emitted = True
 
         return events
 
 
 class PinchDetector(BaseGestureDetector):
-    """Detects pinch gesture using thumb and index tips, normalized by hand scale."""
     def __init__(self, hand_label, hold_frames=None):
         super().__init__(hand_label, 'pinch', hold_frames)
         self.on_thresh = PINCH_ON_THRESH
@@ -125,11 +113,6 @@ class PinchDetector(BaseGestureDetector):
 
 
 class TwoFingerUpDetector(BaseGestureDetector):
-    """
-    Detect when index and middle fingers are extended upward.
-    Condition: both index and middle tips have y < their respective MCPs,
-    and optionally ring and pinky tips are not extended (y > their MCPs).
-    """
     def __init__(self, hand_label, hold_frames=None, require_others_down=True):
         super().__init__(hand_label, 'two_finger_up', hold_frames)
         self.require_others_down = require_others_down
@@ -143,13 +126,16 @@ class TwoFingerUpDetector(BaseGestureDetector):
         middle_tip = landmarks[MIDDLE_TIP_IDX]
         middle_mcp = landmarks[MIDDLE_MCP_IDX]
         wrist = landmarks[WRIST_IDX]
+        thumb_tip = landmarks[THUMB_TIP_IDX]
 
+        # Condition 1: index and middle tips above their MCPs and above wrist
         index_up = index_tip[1] < index_mcp[1] and index_tip[1] < wrist[1]
         middle_up = middle_tip[1] < middle_mcp[1] and middle_tip[1] < wrist[1]
 
         if not (index_up and middle_up):
             return False, None
 
+        # Condition 2: ring and pinky down (optional)
         if self.require_others_down:
             ring_tip = landmarks[RING_TIP_IDX]
             ring_mcp = landmarks[RING_MCP_IDX]
@@ -160,6 +146,20 @@ class TwoFingerUpDetector(BaseGestureDetector):
             pinky_down = pinky_tip[1] >= pinky_mcp[1]
             if not (ring_down and pinky_down):
                 return False, None
+
+        # Condition 3: exclude pinch (index and thumb not too close)
+        dx = index_tip[0] - thumb_tip[0]
+        dy = index_tip[1] - thumb_tip[1]
+        dz = index_tip[2] - thumb_tip[2]
+        pinch_dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+        # Hand scale for normalization
+        sx = middle_mcp[0] - wrist[0]
+        sy = middle_mcp[1] - wrist[1]
+        sz = middle_mcp[2] - wrist[2]
+        hand_scale = math.sqrt(sx*sx + sy*sy + sz*sz) or 1.0
+        rel_pinch_dist = pinch_dist / hand_scale
+        if rel_pinch_dist < 0.4:  # threshold to avoid pinch
+            return False, None
 
         avg_x = (index_tip[0] + middle_tip[0]) / 2.0
         avg_y = (index_tip[1] + middle_tip[1]) / 2.0

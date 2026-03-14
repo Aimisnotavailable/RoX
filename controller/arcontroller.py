@@ -1,4 +1,4 @@
-# arcontroller.py
+# controller/arcontroller.py
 import threading
 import time
 import glm
@@ -20,9 +20,7 @@ class ARController:
         
         # Gesture manager
         self.gesture_manager = GestureManager()
-        # Add detectors
-        # In __init__:
-        self.gesture_manager.add_detector(PinchDetector('LEFT', hold_frames=15))   # 0.5s at 30fps
+        self.gesture_manager.add_detector(PinchDetector('LEFT', hold_frames=15))
         self.gesture_manager.add_detector(PinchDetector('RIGHT', hold_frames=5))
         self.gesture_manager.add_detector(TwoFingerUpDetector('LEFT', hold_frames=None, require_others_down=True))
         self.gesture_manager.add_detector(TwoFingerUpDetector('RIGHT', hold_frames=None, require_others_down=True))
@@ -61,11 +59,11 @@ class ARController:
         self.two_finger_up_right_active = False
         self.two_finger_up_right_pos = None
         
-        # Radial menu (now on left hand)
+        # Radial menu (on left hand)
         self.radial_menu_active = False
         self.radial_menu_center = None
         
-        # Legacy zoom tracking (two-hand pinch)
+        # Zoom tracking
         self.last_zoom_dist = None
 
         get_logger_info('AR', 'THREAD FOR AR SYSTEM INITIALIZED')
@@ -115,14 +113,14 @@ class ARController:
         if self._hand_type_right == "REAL" and self.smooth_right_landmarks:
             right_tuples = [(v.x, v.y, v.z) for v in self.smooth_right_landmarks]
 
-        # Process gestures only for real hands
+        # Process gestures
         events = self.gesture_manager.process_both(left_tuples, right_tuples, now)
 
-        # Reset pinch flags (will be set by events)
+        # Reset pinch flags
         self._raw_left_pinch = False
         self._raw_right_pinch = False
 
-        # If a hand is ghost, force its pinch state to False
+        # Ghost hand cleanup
         if self._hand_type_left != "REAL":
             self.pinch_active_left = False
             self.pinch_hold_emitted['LEFT'] = False
@@ -134,7 +132,7 @@ class ARController:
             self.pinch_start_right = None
             self.pinch_current_right = None
 
-        # Handle gesture events
+        # Handle events
         for ev in events:
             if ev is None:
                 continue
@@ -146,30 +144,25 @@ class ARController:
                         self._raw_left_pinch = True
                         self.pinch_hold_emitted['LEFT'] = False
                         self.pinch_start_left = self.smooth_left_pos
-                        # Close any existing menu if we start a new pinch
                         if self.radial_menu_active:
                             self.close_radial_menu()
                     elif ev.event_type == 'UPDATE' and ev.value is not None:
                         self._raw_left_pinch = True
                         self.pinch_current_left = self.smooth_left_pos
                     elif ev.event_type == 'HOLD':
-                        # Hold threshold reached – open radial menu immediately
                         self.pinch_hold_emitted['LEFT'] = True
-                        get_logger_info('AR', 'Left pinch HOLD detected – opening menu')
+                        get_logger_info('AR', 'Left pinch HOLD – opening menu')
                         self.open_radial_menu(self.smooth_left_pos)
                     elif ev.event_type == 'END':
                         if self.radial_menu_active:
-                            get_logger_info('DEBUG', 'Left pinch END with menu active – executing selection')
                             self.execute_radial_selection()
                         else:
-                            get_logger_info('DEBUG', f'Left pinch END, hold_emitted={self.pinch_hold_emitted["LEFT"]}')
                             if not self.pinch_hold_emitted['LEFT']:
                                 get_logger_info('DEBUG', 'Left quick pinch – toggling mode')
                                 self.engine.scene.world.voxel_handler.switch_mode()
                         self.pinch_active_left = False
                         self._raw_left_pinch = False
                         self.pinch_start_left = None
-                        # Do not reset radial_menu_active here – it is reset in execute or close
                 elif ev.hand == 'RIGHT':
                     if ev.event_type == 'START':
                         self.pinch_active_right = True
@@ -181,10 +174,8 @@ class ARController:
                         self.pinch_current_right = self.smooth_right_pos
                     elif ev.event_type == 'HOLD':
                         self.pinch_hold_emitted['RIGHT'] = True
-                        get_logger_info('AR', 'Right pinch HOLD detected')
-                        # Optional: could do something else
+                        get_logger_info('AR', 'Right pinch HOLD')
                     elif ev.event_type == 'END':
-                        # Quick pinch if no hold
                         if not self.pinch_hold_emitted['RIGHT']:
                             self.engine.scene.world.voxel_handler.set_voxel()
                         self.pinch_active_right = False
@@ -192,6 +183,7 @@ class ARController:
                         self.pinch_start_right = None
 
             elif ev.gesture_name == 'two_finger_up':
+                get_logger_info('DEBUG', f'Two-finger-up {ev.hand} {ev.event_type} value={ev.value}')
                 if ev.hand == 'LEFT':
                     if ev.event_type == 'START' and ev.value is not None:
                         self.two_finger_up_left_active = True
@@ -199,6 +191,7 @@ class ARController:
                     elif ev.event_type == 'UPDATE' and ev.value is not None and self.two_finger_up_left_pos is not None:
                         dx = ev.value[0] - self.two_finger_up_left_pos[0]
                         dy = ev.value[1] - self.two_finger_up_left_pos[1]
+                        get_logger_info('DEBUG', f'Left two-finger-up delta: {dx:.3f}, {dy:.3f}')
                         world = self.engine.scene.world
                         world.world_yaw += dx * 2.0
                         world.world_pitch += dy * 2.0
@@ -214,6 +207,7 @@ class ARController:
                     elif ev.event_type == 'UPDATE' and ev.value is not None and self.two_finger_up_right_pos is not None:
                         dx = ev.value[0] - self.two_finger_up_right_pos[0]
                         dy = ev.value[1] - self.two_finger_up_right_pos[1]
+                        get_logger_info('DEBUG', f'Right two-finger-up delta: {dx:.3f}, {dy:.3f}')
                         if self.engine.player.mode == "FPS":
                             self.engine.player.fps_camera.rotate_yaw(dx * 2.0)
                             self.engine.player.fps_camera.rotate_pitch(dy * 2.0)
@@ -222,24 +216,21 @@ class ARController:
                         self.two_finger_up_right_active = False
                         self.two_finger_up_right_pos = None
 
-        # Update smoothed positions (index tip)
+        # Update smoothed positions
         self.smooth_left_pos = self.smooth_left_landmarks[8] if len(self.smooth_left_landmarks) > 8 else None
         self.smooth_right_pos = self.smooth_right_landmarks[8] if len(self.smooth_right_landmarks) > 8 else None
 
-        # Set AR mouse position and click for building (right hand)
+        # AR mouse for building
         if self.smooth_right_pos is not None:
             self.ar_mouse_pos = (self.smooth_right_pos.x * WIN_RES[0], self.smooth_right_pos.y * WIN_RES[1])
         else:
             self.ar_mouse_pos = None
         self.ar_right_click = self.pinch_active_right
 
-        # --- Two‑hand pinch: zoom (highest priority) ---
-        # If both hands are pinched, override any other gesture that might conflict.
+        # Two‑hand pinch zoom
         if self.pinch_active_left and self.pinch_active_right:
-            # If menu was open, close it
             if self.radial_menu_active:
                 self.close_radial_menu()
-            # Compute zoom based on distance between hands
             if self.smooth_left_pos is not None and self.smooth_right_pos is not None:
                 l_pixel = (self.smooth_left_pos.x * WIN_RES[0], self.smooth_left_pos.y * WIN_RES[1])
                 r_pixel = (self.smooth_right_pos.x * WIN_RES[0], self.smooth_right_pos.y * WIN_RES[1])
@@ -255,7 +246,6 @@ class ARController:
             self.last_zoom_dist = None
 
     def open_radial_menu(self, hand_pos):
-        """Activate radial menu at hand position (left hand)."""
         if hand_pos is None:
             return
         screen_x = hand_pos.x * WIN_RES[0]
@@ -263,10 +253,9 @@ class ARController:
         self.radial_menu_active = True
         self.radial_menu_center = (screen_x, screen_y)
         self.engine.scene.hud.radial_menu.activate(self.radial_menu_center)
-        get_logger_info('AR', f'Radial menu opened at ({screen_x:.0f}, {screen_y:.0f})')
+        get_logger_info('AR', f'Radial menu at ({screen_x:.0f}, {screen_y:.0f})')
 
     def close_radial_menu(self):
-        """Force close the radial menu without selection."""
         if self.radial_menu_active:
             self.engine.scene.hud.radial_menu.deactivate()
             self.radial_menu_active = False
@@ -275,11 +264,11 @@ class ARController:
     def execute_radial_selection(self):
         selected = self.engine.scene.hud.radial_menu.selected_index
         if selected < 0:
-            get_logger_info('AR', 'Radial menu closed with no selection')
+            get_logger_info('AR', 'Radial menu closed – no selection')
             self.close_radial_menu()
             return
         option = self.engine.scene.hud.radial_menu.options[selected]
         voxel_id = option["voxel_id"]
-        get_logger_info('AR', f'Radial menu selected: {option["name"]} (ID {voxel_id})')
+        get_logger_info('AR', f'Selected: {option["name"]} (ID {voxel_id})')
         self.engine.scene.world.voxel_handler.new_voxel_id = voxel_id
         self.close_radial_menu()
