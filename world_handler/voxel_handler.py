@@ -5,6 +5,8 @@ import math
 from settings import *
 from meshes.chunk_mesh_builder import get_chunk_index
 from scripts.logger import get_logger_info
+        
+INTERACTION_MODE = ['ADD', 'REMOVE', 'GRAB']
 
 class VoxelHandler:
     def __init__(self, world):
@@ -43,7 +45,10 @@ class VoxelHandler:
         
         if not self.is_dragging:
             if self.engine.player.mode == "FPS":
-                self.raycast_fps(self.engine.player.position, self.engine.player.forward)
+                if self.interaction_mode == 0 :
+                    self.raycast_fps(self.engine.player.position, self.engine.player.forward)
+                elif self.interaction_mode == 2:
+                    self.ray_cast_from_hands()
             elif self.engine.player.mode == "RTS":
                 ray_origin, ray_direction = self.get_rts_ray(screen_pos=ar_mouse_pos)
                 self.raycast_rts(ray_origin, ray_direction)
@@ -79,12 +84,16 @@ class VoxelHandler:
         if mouse_pressed and not self.is_dragging:
             if self.voxel_id and self.voxel_normal: 
                 self.is_dragging = True
-                if self.interaction_mode == 1: # ADD
+                if self.interaction_mode == 0: # ADD
                     self.snap_normal = glm.vec3(self.voxel_normal)
                     self.exact_pos = glm.vec3(self.voxel_world_pos) + self.snap_normal
-                else: # REMOVE
+                elif self.interaction_mode == 1: # REMOVE
                     self.snap_normal = -glm.vec3(self.voxel_normal) 
                     self.exact_pos = glm.vec3(self.voxel_world_pos)
+                else: # GRAB
+                    self.snap_normal = -glm.vec3(self.voxel_normal) 
+                    self.exact_pos = glm.vec3(self.voxel_world_pos)
+
                 self.place_pos = glm.vec3(self.exact_pos)
                 self._apply_drag_modification(self.place_pos)
 
@@ -189,6 +198,24 @@ class VoxelHandler:
         
         return self.engine.player.position, ray_direction
 
+    def ray_cast_from_hands(self):
+        """Raycast from camera through right hand index tip (FPS mode)."""
+        ar_controller = getattr(self.engine, 'ar_controller', None)
+        if ar_controller is None:
+            return
+        # Use smoothed right landmarks
+        landmarks = ar_controller.smooth_right_landmarks
+        if not landmarks or len(landmarks) < 21:
+            return
+        tip_norm = landmarks[8]  # index tip
+        screen_x = tip_norm.x * WIN_RES[0]
+        screen_y = tip_norm.y * WIN_RES[1]
+
+        # Get world ray from camera through screen point
+        origin, direction = self.get_rts_ray(screen_pos=(screen_x, screen_y))
+        # Reuse generic raycast (max_dist 8.0 for FPS)
+        self.raycast_generic(origin, direction, is_rts=False)
+        
     def raycast_fps(self, origin, direction):
         self.raycast_generic(origin, direction, is_rts=False)
 
@@ -302,9 +329,8 @@ class VoxelHandler:
             get_logger_info('DEBUG', f'Removed block at {self.voxel_world_pos}')
 
     def switch_mode(self):
-        self.interaction_mode = not self.interaction_mode
-        mode_str = "ADD" if self.interaction_mode else "REMOVE"
-        get_logger_info('GAME', f'Interaction Mode switched to: {mode_str}')
+        self.interaction_mode = (self.interaction_mode + 1) % len(INTERACTION_MODE)
+        get_logger_info('GAME', f'Interaction Mode switched to: {INTERACTION_MODE[self.interaction_mode]}')
 
     def _rebuild_adj_for_pos(self, local_pos, world_pos):
         lx, ly, lz = int(math.floor(local_pos[0])), int(math.floor(local_pos[1])), int(math.floor(local_pos[2]))
