@@ -120,10 +120,11 @@ pip install -r requirements.txt
 * **3D Mode**
 
 ```bash
-python 3Drox.py
+python main.py
 
 ```
 
+# ONLY THE 3D MODE IS COMPILED PROPERLY AS OF NOW
 * **2D Mode**
 
 ```bash
