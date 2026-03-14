@@ -4,7 +4,7 @@ import moderngl as mgl
 import array
 import math
 import time
-from settings import WIN_RES
+from settings import WIN_RES, INTERACTION_MODE
 
 # Radial menu configuration – same techy look
 RADIAL_MENU_RADIUS = 160
@@ -223,7 +223,7 @@ class HUD:
             5: "SNOW", 6: "LEAVES", 7: "WOOD",
         }
         current_block = block_map.get(voxel_handler.new_voxel_id, "UNKNOWN")
-        mode_str = "ADD" if voxel_handler.interaction_mode == 1 else "REMOVE"
+        mode_str = INTERACTION_MODE[voxel_handler.interaction_mode]
 
         # Left hand status
         left_status = "STANDBY"

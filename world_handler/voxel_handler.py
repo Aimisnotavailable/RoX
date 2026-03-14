@@ -6,8 +6,6 @@ from settings import *
 from meshes.chunk_mesh_builder import get_chunk_index
 from scripts.logger import get_logger_info
         
-INTERACTION_MODE = ['ADD', 'REMOVE', 'GRAB']
-
 class VoxelHandler:
     def __init__(self, world):
         self.world = world
@@ -45,9 +43,9 @@ class VoxelHandler:
         
         if not self.is_dragging:
             if self.engine.player.mode == "FPS":
-                if self.interaction_mode == 0 :
+                if self.interaction_mode != 2:
                     self.raycast_fps(self.engine.player.position, self.engine.player.forward)
-                elif self.interaction_mode == 2:
+                elif self.interaction_mode == 2 and not ar_controller.is_grabbing:
                     self.ray_cast_from_hands()
             elif self.engine.player.mode == "RTS":
                 ray_origin, ray_direction = self.get_rts_ray(screen_pos=ar_mouse_pos)

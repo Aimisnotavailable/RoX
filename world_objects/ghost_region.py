@@ -17,16 +17,23 @@ class GhostRegion:
         prog['m_proj'].write(self.engine.player.m_proj)
         prog['m_view'].write(self.engine.player.m_view)
 
-        # mode_id 0 = red (for remove), 1 = blue (for add). We'll use red for ghost.
-        prog['mode_id'] = 0
+        # World model matrix (applies rotation and scale to the entire world)
+        world_model = self.engine.scene.world.m_model
 
-        # Scale cube to region size
+        # Build local model: first center the unit cube at origin, then scale, then translate
+        center_offset = glm.translate(glm.mat4(1.0), glm.vec3(-0.5, -0.5, -0.5))
         scale = glm.scale(glm.mat4(1.0), glm.vec3(self.size))
         trans = glm.translate(glm.mat4(1.0), self.position)
-        model = trans * scale
-        prog['m_model'].write(model)
+        local_model = trans * scale * center_offset
 
-        # Enable wireframe for ghost
-        self.engine.ctx.wireframe = True
+        # Combine with world transform so the ghost moves with the rotated/scaled world
+        final_model = world_model * local_model
+        prog['m_model'].write(final_model)
+
+        # Use green (mode_id = 2) – fallback to blue if shader not updated
+        try:
+            prog['mode_id'] = 2
+        except:
+            prog['mode_id'] = 1
+
         self.mesh.vao.render()
-        self.engine.ctx.wireframe = False

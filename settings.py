@@ -97,6 +97,9 @@ WATER_AREA = 5 * CHUNK_SIZE * WORLD_W
 CLOUD_SCALE = 25
 CLOUD_HEIGHT = WORLD_H * CHUNK_SIZE * 2
 
+# WORLD
+INTERACTION_MODE = ['REMOVE', 'ADD', 'GRAB']
+
 # -------------------- DEPTH INTEGRATION --------------------
 # AR depth gesture settings
 

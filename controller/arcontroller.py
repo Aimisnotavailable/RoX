@@ -31,6 +31,7 @@ TOP_MENU = [
         {"name": "SIZE 5", "color": (200,200,200), "size": 5},
         {"name": "BACK",   "color": (100,100,100), "action": "back"}
     ]},
+    {"name": "EXIT", "color": (150,150,150), "action": "exit"},
 ]
 
 class ARController:
@@ -38,9 +39,8 @@ class ARController:
         self.engine = engine
         self.ar = AR(WIN_RES)
         self.cap = cv2.VideoCapture(0)
-        
         self.running = True
-        
+
         # Gesture manager
         self.gesture_manager = GestureManager()
         self.gesture_manager.add_detector(PinchDetector('LEFT', hold_frames=30))
@@ -50,63 +50,50 @@ class ARController:
         self.gesture_manager.add_detector(OpenPalmDetector('LEFT', hold_frames=15))
         self.gesture_manager.add_detector(PointDetector('LEFT', hold_frames=None))
         self.gesture_manager.add_detector(PointDetector('RIGHT', hold_frames=None))
-        
-        # Raw data
+
+        # Raw data from AR thread
         self._raw_left_landmarks = []
         self._raw_right_landmarks = []
-        self._raw_left_pinch = False
-        self._raw_right_pinch = False
         self._hand_type_left = "REAL"
         self._hand_type_right = "REAL"
-        
-        # Smoothed landmarks
+
+        # Smoothed landmarks (EMA)
         self.smooth_left_landmarks = []
         self.smooth_right_landmarks = []
         self.ema_alpha = 0.1
-        
-        self.smooth_left_pos = None  
+        self.smooth_left_pos = None
         self.smooth_right_pos = None
+
+        # AR mouse for RTS mode
         self.ar_mouse_pos = None
         self.ar_right_click = False
-        
+
         # Pinch state
         self.pinch_active_left = False
         self.pinch_active_right = False
         self.pinch_hold_emitted = {'LEFT': False, 'RIGHT': False}
-        self.pinch_start_left = None
-        self.pinch_start_right = None
-        self.pinch_current_left = None
-        self.pinch_current_right = None
-        self.last_mode_toggle_time = 0
 
-        # Two-finger-up state
+        # Two‑finger‑up state
         self.two_finger_up_left_active = False
         self.two_finger_up_left_pos = None
         self.two_finger_up_right_active = False
         self.two_finger_up_right_pos = None
-        
+
         # Radial menu
         self.radial_menu_active = False
         self.radial_menu_center = None
-        
-        # Zoom tracking
+
+        # Two‑hand pinch zoom
         self.last_zoom_dist = None
 
         # Grab state
         self.grab_size = 1
         self.is_grabbing = False
-        self.grabbed_region = None          # list of (voxel_id, offset)
+        self.grabbed_region = None          # list of (voxel_id, world_pos, chunk, idx, local_pos)
         self.grabbed_region_center = None   # original center (world pos, integer)
         self.grabbed_region_offset = None   # list of (dx,dy,dz) relative to center
-        self.grabbed_region_current_pos = None  # for ghost rendering
+        self.grabbed_region_current_pos = None  # for ghost rendering (world space)
         self.grab_distance = None            # distance from camera to grabbed center at start
-
-        # Click detection (left hand point) – simple z‑delta from start to end
-        self.left_point_active = False
-        self.left_point_start_z = None
-        self.CLICK_Z_DELTA_THRESHOLD = -0.05   # negative = toward camera
-        self.CLICK_COOLDOWN = 0.3
-        self.last_click_time = 0
 
         # Right hand point hit (for grab target)
         self.right_point_hit_pos = None
@@ -146,35 +133,19 @@ class ARController:
             smoothed.append(new_pos)
         return smoothed
 
-    def get_world_pos_from_hand_point_fps(self, hand_landmarks, return_continuous=False):
-        """
-        Returns the integer world position of the block under the index fingertip,
-        using FPS raycasting from the camera through the hand's screen position.
-        If return_continuous=True, returns the exact hit point as glm.vec3.
-        """
+    def get_block_under_hand(self, hand_landmarks):
+        """Return integer world position of block under index fingertip, or None."""
         if not hand_landmarks or len(hand_landmarks) < 21:
             return None
-
         tip_norm = hand_landmarks[8]
         screen_x = tip_norm.x * WIN_RES[0]
         screen_y = tip_norm.y * WIN_RES[1]
 
-        # Get ray from camera through screen point
-        camera = self.engine.player
-        x = (2.0 * screen_x) / WIN_RES[0] - 1.0
-        y = 1.0 - (2.0 * screen_y) / WIN_RES[1]
-        ray_clip = glm.vec4(x, y, -1.0, 1.0)
-        ray_eye = glm.inverse(camera.m_proj) * ray_clip
-        ray_eye = glm.vec4(ray_eye.x, ray_eye.y, -1.0, 0.0)
-        ray_world = glm.inverse(camera.m_view) * ray_eye
-        ray_dir = glm.normalize(glm.vec3(ray_world))
-        ray_origin = camera.position
-
-        # Transform to local world space
         vh = self.engine.scene.world.voxel_handler
+        origin, direction = vh.get_rts_ray(screen_pos=(screen_x, screen_y))
         inv_model = glm.inverse(self.engine.scene.world.m_model)
-        local_origin = glm.vec3(inv_model * glm.vec4(ray_origin, 1.0))
-        local_dir = glm.normalize(glm.vec3(inv_model * glm.vec4(ray_dir, 0.0)))
+        local_origin = glm.vec3(inv_model * glm.vec4(origin, 1.0))
+        local_dir = glm.normalize(glm.vec3(inv_model * glm.vec4(direction, 0.0)))
 
         max_dist = 10.0
         step = 0.05
@@ -186,12 +157,7 @@ class ARController:
             block_z = int(math.floor(pos.z))
             voxel_id, _, _, _ = vh.get_voxel_id((block_x, block_y, block_z))
             if voxel_id != 0:
-                if return_continuous:
-                    # Convert back to world space
-                    world_pos = glm.vec3(self.engine.scene.world.m_model * glm.vec4(pos, 1.0))
-                    return world_pos
-                else:
-                    return glm.ivec3(block_x, block_y, block_z)
+                return glm.ivec3(block_x, block_y, block_z)
         return None
 
     def update(self):
@@ -201,40 +167,28 @@ class ARController:
         self.smooth_left_landmarks = self._apply_ema(self.smooth_left_landmarks, self._raw_left_landmarks)
         self.smooth_right_landmarks = self._apply_ema(self.smooth_right_landmarks, self._raw_right_landmarks)
 
-        # Convert to tuples for gesture detectors (only if hand is REAL)
         left_tuples = []
         right_tuples = []
-
         if self._hand_type_left == "REAL" and self.smooth_left_landmarks:
             left_tuples = [(v.x, v.y, v.z) for v in self.smooth_left_landmarks]
         if self._hand_type_right == "REAL" and self.smooth_right_landmarks:
             right_tuples = [(v.x, v.y, v.z) for v in self.smooth_right_landmarks]
 
-        # Process gestures
         events = self.gesture_manager.process_both(left_tuples, right_tuples, now)
 
-        # Reset pinch flags
-        self._raw_left_pinch = False
-        self._raw_right_pinch = False
-
-        # Reset right point hit (will be updated if a hit occurs)
+        # Reset per‑frame flags
         self.right_point_hit_pos = None
 
-        # Handle events
         for ev in events:
             if ev is None:
                 continue
 
+            # ----- PINCH -----
             if ev.gesture_name == 'pinch':
                 if ev.hand == 'LEFT':
                     if ev.event_type == 'START':
                         self.pinch_active_left = True
-                        self._raw_left_pinch = True
                         self.pinch_hold_emitted['LEFT'] = False
-                        self.pinch_start_left = self.smooth_left_pos
-                    elif ev.event_type == 'UPDATE' and ev.value is not None:
-                        self._raw_left_pinch = True
-                        self.pinch_current_left = self.smooth_left_pos
                     elif ev.event_type == 'HOLD':
                         self.pinch_hold_emitted['LEFT'] = True
                     elif ev.event_type == 'END':
@@ -242,16 +196,11 @@ class ARController:
                             get_logger_info('DEBUG', 'Left quick pinch – toggling mode')
                             self.engine.scene.world.voxel_handler.switch_mode()
                         self.pinch_active_left = False
-                        self._raw_left_pinch = False
-                        self.pinch_start_left = None
                 elif ev.hand == 'RIGHT':
                     vh = self.engine.scene.world.voxel_handler
                     if vh.interaction_mode == 2:  # GRAB mode
                         if ev.event_type == 'START' and not self.is_grabbing:
-                            # Start grab using last known hit from point detector
-                            center = self.right_point_hit_pos
-                            if center is None:
-                                center = self.get_world_pos_from_hand_point_fps(self.smooth_right_landmarks, return_continuous=False)
+                            center = self.right_point_hit_pos or self.get_block_under_hand(self.smooth_right_landmarks)
                             if center is None:
                                 get_logger_info('DEBUG', 'No block under hand to grab')
                                 continue
@@ -260,39 +209,28 @@ class ARController:
                             self._start_grab(vh)
                             vh.voxel_world_pos = old_pos
                         elif ev.event_type == 'UPDATE' and self.is_grabbing:
-                            # Update grabbed region position to follow right hand index tip in world space
                             if self.smooth_right_landmarks and len(self.smooth_right_landmarks) > 8:
                                 tip_norm = self.smooth_right_landmarks[8]
                                 screen_x = tip_norm.x * WIN_RES[0]
                                 screen_y = tip_norm.y * WIN_RES[1]
-                                # Get ray from camera
                                 origin, direction = vh.get_rts_ray(screen_pos=(screen_x, screen_y))
-                                # Compute world position at stored distance
                                 if self.grab_distance is not None:
                                     world_pos = origin + direction * self.grab_distance
                                     self.grabbed_region_current_pos = world_pos
                         elif ev.event_type == 'END' and self.is_grabbing:
                             self._end_grab()
                     else:
-                        # Normal pinch (add/remove)
                         if ev.event_type == 'START':
                             self.pinch_active_right = True
-                            self._raw_right_pinch = True
                             self.pinch_hold_emitted['RIGHT'] = False
-                            self.pinch_start_right = self.smooth_right_pos
-                        elif ev.event_type == 'UPDATE' and ev.value is not None:
-                            self._raw_right_pinch = True
-                            self.pinch_current_right = self.smooth_right_pos
                         elif ev.event_type == 'HOLD':
                             self.pinch_hold_emitted['RIGHT'] = True
-                            get_logger_info('AR', 'Right pinch HOLD')
                         elif ev.event_type == 'END':
                             if not self.pinch_hold_emitted['RIGHT']:
-                                self.engine.scene.world.voxel_handler.set_voxel()
+                                vh.set_voxel()
                             self.pinch_active_right = False
-                            self._raw_right_pinch = False
-                            self.pinch_start_right = None
 
+            # ----- TWO‑FINGER‑UP -----
             elif ev.gesture_name == 'two_finger_up':
                 get_logger_info('DEBUG', f'Two-finger-up {ev.hand} {ev.event_type} value={ev.value}')
                 if ev.hand == 'LEFT':
@@ -302,7 +240,6 @@ class ARController:
                     elif ev.event_type == 'UPDATE' and ev.value is not None and self.two_finger_up_left_pos is not None:
                         dx = ev.value[0] - self.two_finger_up_left_pos[0]
                         dy = ev.value[1] - self.two_finger_up_left_pos[1]
-                        get_logger_info('DEBUG', f'Left two-finger-up delta: {dx:.3f}, {dy:.3f}')
                         world = self.engine.scene.world
                         world.world_yaw += dx * 2.0
                         world.world_pitch += dy * 2.0
@@ -318,7 +255,6 @@ class ARController:
                     elif ev.event_type == 'UPDATE' and ev.value is not None and self.two_finger_up_right_pos is not None:
                         dx = ev.value[0] - self.two_finger_up_right_pos[0]
                         dy = ev.value[1] - self.two_finger_up_right_pos[1]
-                        get_logger_info('DEBUG', f'Right two-finger-up delta: {dx:.3f}, {dy:.3f}')
                         if self.engine.player.mode == "FPS":
                             self.engine.player.fps_camera.rotate_yaw(dx * 2.0)
                             self.engine.player.fps_camera.rotate_pitch(dy * 2.0)
@@ -327,9 +263,13 @@ class ARController:
                         self.two_finger_up_right_active = False
                         self.two_finger_up_right_pos = None
 
+            # ----- OPEN PALM (LEFT) -----
             elif ev.gesture_name == 'open_palm' and ev.hand == 'LEFT':
                 if ev.event_type == 'START':
                     self._open_palm_active = True
+                    if self.radial_menu_active:
+                        self.execute_radial_selection()
+                        self._open_palm_used_to_close = True
                 elif ev.event_type == 'HOLD' and not self.radial_menu_active and not self._open_palm_used_to_close:
                     if self.smooth_left_pos is not None:
                         self.open_radial_menu(self.smooth_left_pos)
@@ -337,53 +277,37 @@ class ARController:
                     self._open_palm_active = False
                     self._open_palm_used_to_close = False
 
+            # ----- POINT (LEFT) – menu navigation -----
             elif ev.gesture_name == 'point' and ev.hand == 'LEFT':
-                # Left hand point: navigate menu and detect quick forward jab
-                if ev.event_type == 'START' and ev.value is not None:
-                    self.left_point_active = True
-                    self.left_point_start_z = ev.value[2]
-                elif ev.event_type == 'UPDATE' and ev.value is not None and self.radial_menu_active:
+                if ev.event_type == 'UPDATE' and ev.value is not None and self.radial_menu_active:
                     screen_x = ev.value[0] * WIN_RES[0]
                     screen_y = ev.value[1] * WIN_RES[1]
                     self.engine.scene.hud.radial_menu.update_selection((screen_x, screen_y))
-                elif ev.event_type == 'END' and ev.value is not None and self.left_point_active:
-                    delta_z = ev.value[2] - self.left_point_start_z
-                    if delta_z < self.CLICK_Z_DELTA_THRESHOLD and (now - self.last_click_time) > self.CLICK_COOLDOWN:
-                        self.last_click_time = now
-                        if self.radial_menu_active:
-                            self.execute_radial_selection()
-                    self.left_point_active = False
-                    self.left_point_start_z = None
 
+            # ----- POINT (RIGHT) – grab target -----
             elif ev.gesture_name == 'point' and ev.hand == 'RIGHT':
-                # Right hand point: update hit position for visual feedback
                 if ev.event_type == 'UPDATE' and ev.value is not None:
-                    hit = self.get_world_pos_from_hand_point_fps(self.smooth_right_landmarks, return_continuous=False)
-                    if hit is not None:
-                        self.right_point_hit_pos = hit
+                    self.right_point_hit_pos = self.get_block_under_hand(self.smooth_right_landmarks)
 
-        # Update smoothed positions
+        # Update smoothed positions for crosshair
         self.smooth_left_pos = self.smooth_left_landmarks[8] if len(self.smooth_left_landmarks) > 8 else None
         self.smooth_right_pos = self.smooth_right_landmarks[8] if len(self.smooth_right_landmarks) > 8 else None
 
-        # AR mouse for building
-        if self.smooth_right_pos is not None:
-            self.ar_mouse_pos = (self.smooth_right_pos.x * WIN_RES[0], self.smooth_right_pos.y * WIN_RES[1])
-        else:
-            self.ar_mouse_pos = None
+        # AR mouse for RTS
+        self.ar_mouse_pos = (self.smooth_right_pos.x * WIN_RES[0], self.smooth_right_pos.y * WIN_RES[1]) if self.smooth_right_pos else None
         self.ar_right_click = self.pinch_active_right
 
         # Two‑hand pinch zoom
         if self.pinch_active_left and self.pinch_active_right and not self.is_grabbing:
             if self.radial_menu_active:
                 self.close_radial_menu()
-            if self.smooth_left_pos is not None and self.smooth_right_pos is not None:
+            if self.smooth_left_pos and self.smooth_right_pos:
                 l_pixel = (self.smooth_left_pos.x * WIN_RES[0], self.smooth_left_pos.y * WIN_RES[1])
                 r_pixel = (self.smooth_right_pos.x * WIN_RES[0], self.smooth_right_pos.y * WIN_RES[1])
                 current_dist = math.hypot(l_pixel[0] - r_pixel[0], l_pixel[1] - r_pixel[1])
                 if self.last_zoom_dist is not None:
-                    delta_zoom = (current_dist - self.last_zoom_dist) * 0.005
-                    self.engine.scene.world.world_scale += delta_zoom
+                    delta = (current_dist - self.last_zoom_dist) * 0.005
+                    self.engine.scene.world.world_scale += delta
                     self.engine.scene.world.world_scale = max(0.1, min(10.0, self.engine.scene.world.world_scale))
                 self.last_zoom_dist = current_dist
             else:
@@ -391,28 +315,25 @@ class ARController:
         else:
             self.last_zoom_dist = None
 
-        # Clean up pinch state for hands that are completely absent
+        # Clean up pinch if hand disappeared
         if not self.smooth_left_landmarks and self._hand_type_left == "REAL":
             self.pinch_active_left = False
             self.pinch_hold_emitted['LEFT'] = False
-            self.pinch_start_left = None
-            self.pinch_current_left = None
-
         if not self.smooth_right_landmarks and self._hand_type_right == "REAL":
             self.pinch_active_right = False
             self.pinch_hold_emitted['RIGHT'] = False
-            self.pinch_start_right = None
-            self.pinch_current_right = None
 
-        # Update ghost region
+        # Update ghost region (position is set by grab UPDATE; rendering handles centering)
         if hasattr(self.engine.scene, 'ghost_region'):
             self.engine.scene.ghost_region.visible = self.is_grabbing
             if self.is_grabbing and self.grabbed_region_current_pos is not None:
                 self.engine.scene.ghost_region.position = self.grabbed_region_current_pos
                 self.engine.scene.ghost_region.size = self.grab_size
 
+    # ------------------------------------------------------------------
+    # Grab helpers
+    # ------------------------------------------------------------------
     def _start_grab(self, vh):
-        """Initiate grab of a cubic region centered at vh.voxel_world_pos."""
         center = vh.voxel_world_pos
         if center is None:
             get_logger_info('DEBUG', 'Grab start failed: center is None')
@@ -426,33 +347,32 @@ class ARController:
         for x in range(min_corner[0], max_corner[0] + 1):
             for y in range(min_corner[1], max_corner[1] + 1):
                 for z in range(min_corner[2], max_corner[2] + 1):
-                    voxel_id, idx, local, chunk = vh.get_voxel_id((x, y, z))
+                    voxel_id, idx, local_pos, chunk = vh.get_voxel_id((x, y, z))
                     if chunk is not None and voxel_id != 0:
-                        region.append((voxel_id, (x, y, z), chunk, idx))
+                        region.append((voxel_id, (x, y, z), chunk, idx, local_pos))
                         offsets.append((x - center[0], y - center[1], z - center[2]))
 
         if not region:
             get_logger_info('DEBUG', 'No blocks to grab')
             return
 
-        # Remove the blocks
-        for voxel_id, pos, chunk, idx in region:
+        # Remove the blocks and rebuild adjacent chunks
+        for voxel_id, pos, chunk, idx, local_pos in region:
             chunk.voxels[int(idx)] = 0
             chunk.mesh.rebuild()
+            # Rebuild neighboring chunks that may be affected by this removal
+            vh._rebuild_adj_for_pos(local_pos, pos)
 
-        self.grabbed_region = [(voxel_id, offset) for (voxel_id, pos, chunk, idx), offset in zip(region, offsets)]
+        self.grabbed_region = [(voxel_id, offset) for (voxel_id, pos, chunk, idx, local_pos), offset in zip(region, offsets)]
         self.grabbed_region_center = center
         self.grabbed_region_offset = offsets
         self.grabbed_region_current_pos = glm.vec3(center)
-        # Store distance from camera to center for smooth following
-        cam_pos = self.engine.player.position
-        self.grab_distance = glm.distance(cam_pos, glm.vec3(center))
+        self.grab_distance = glm.distance(self.engine.player.position, glm.vec3(center))
         self.is_grabbing = True
 
         get_logger_info('AR', f'Grabbed region of size {self.grab_size} with {len(region)} blocks')
 
     def _end_grab(self):
-        """Place the grabbed region at the current position (snapped to grid)."""
         if not self.is_grabbing or self.grabbed_region_current_pos is None:
             return
 
@@ -468,43 +388,57 @@ class ARController:
             wz = int(min_corner[2] + offset[2])
             target_positions.append((wx, wy, wz))
 
-        # Verify emptiness
+        # Check if any target is out of world bounds
+        world_size = glm.ivec3(WORLD_W * CHUNK_SIZE, WORLD_H * CHUNK_SIZE, WORLD_D * CHUNK_SIZE)
         placeable = True
         chunks_to_rebuild = set()
+        placement_data = []  # store (chunk, idx, world_pos) for later rebuilding adjacents
         for (voxel_id, offset), (wx, wy, wz) in zip(self.grabbed_region, target_positions):
-            target_id, idx, _, chunk = vh.get_voxel_id((wx, wy, wz))
+            if not (0 <= wx < world_size.x and 0 <= wy < world_size.y and 0 <= wz < world_size.z):
+                placeable = False
+                get_logger_info('DEBUG', f'Target out of world bounds: ({wx},{wy},{wz})')
+                break
+            target_id, idx, local_pos, chunk = vh.get_voxel_id((wx, wy, wz))
             if target_id != 0:
                 placeable = False
+                get_logger_info('DEBUG', f'Target occupied at ({wx},{wy},{wz})')
                 break
-            if chunk is not None:
-                chunks_to_rebuild.add(chunk)
+            if chunk is None:
+                placeable = False
+                get_logger_info('DEBUG', f'Target chunk not loaded at ({wx},{wy},{wz})')
+                break
+            placement_data.append((voxel_id, chunk, idx, (wx,wy,wz), local_pos))
+            chunks_to_rebuild.add(chunk)
 
         if placeable:
             # Place all blocks
-            for (voxel_id, offset), (wx, wy, wz) in zip(self.grabbed_region, target_positions):
-                target_id, idx, _, chunk = vh.get_voxel_id((wx, wy, wz))
-                if chunk is not None:
-                    chunk.voxels[int(idx)] = voxel_id
-                else:
-                    get_logger_info('ERROR', f'Placement: chunk is None at ({wx},{wy},{wz})')
+            for voxel_id, chunk, idx, world_pos, local_pos in placement_data:
+                chunk.voxels[int(idx)] = voxel_id
+                # Rebuild neighboring chunks that may be affected by this placement
+                vh._rebuild_adj_for_pos(local_pos, world_pos)
+
+            # We need to rebuild the chunk containing the placed block as well.
             for chunk in chunks_to_rebuild:
                 if chunk:
+                    if chunk.is_empty:
+                        chunk.is_empty = False
                     chunk.mesh.rebuild()
             get_logger_info('AR', f'Placed grabbed region at {target_center}')
         else:
-            # Restore original
-            for (voxel_id, offset), (wx, wy, wz) in zip(self.grabbed_region, target_positions):
+            # Restore original positions
+            for (voxel_id, offset), _ in zip(self.grabbed_region, target_positions):
                 ox = int(self.grabbed_region_center[0] + offset[0])
                 oy = int(self.grabbed_region_center[1] + offset[1])
                 oz = int(self.grabbed_region_center[2] + offset[2])
-                target_id, idx, _, chunk = vh.get_voxel_id((ox, oy, oz))
+                target_id, idx, local_pos, chunk = vh.get_voxel_id((ox, oy, oz))
                 if chunk is not None:
                     chunk.voxels[int(idx)] = voxel_id
+                    # Rebuild neighboring chunks
+                    vh._rebuild_adj_for_pos(local_pos, (ox, oy, oz))
                     chunk.mesh.rebuild()
-                else:
-                    get_logger_info('ERROR', f'Restore: chunk is None at ({ox},{oy},{oz})')
             get_logger_info('AR', 'Cannot place – restored original')
 
+        # Reset grab state
         self.is_grabbing = False
         self.grabbed_region = None
         self.grabbed_region_center = None
@@ -512,6 +446,9 @@ class ARController:
         self.grabbed_region_current_pos = None
         self.grab_distance = None
 
+    # ------------------------------------------------------------------
+    # Radial menu
+    # ------------------------------------------------------------------
     def open_radial_menu(self, hand_pos):
         if hand_pos is None:
             return
@@ -531,12 +468,15 @@ class ARController:
     def execute_radial_selection(self):
         selected = self.engine.scene.hud.radial_menu.selected_index
         if selected < 0:
+            self.close_radial_menu()
             return
         option = self.engine.scene.hud.radial_menu.current_options[selected]
         if "submenu" in option:
             self.engine.scene.hud.radial_menu.push_submenu(option["submenu"])
         elif option.get("action") == "back":
             self.engine.scene.hud.radial_menu.pop_submenu()
+        elif option.get("action") == "exit":
+            self.close_radial_menu()
         elif "voxel_id" in option:
             self.engine.scene.world.voxel_handler.new_voxel_id = option["voxel_id"]
             self.close_radial_menu()
