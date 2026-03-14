@@ -8,36 +8,42 @@ from settings import WIN_RES
 
 # Radial menu configuration – same techy look
 RADIAL_MENU_RADIUS = 160
-RADIAL_MENU_OPTIONS = [
-    {"name": "SAND",   "color": (230, 210, 180), "voxel_id": 1},
-    {"name": "GRASS",  "color": (100, 200, 100), "voxel_id": 2},
-    {"name": "DIRT",   "color": (140, 100, 70),  "voxel_id": 3},
-    {"name": "STONE",  "color": (160, 160, 170), "voxel_id": 4},
-    {"name": "SNOW",   "color": (240, 240, 255), "voxel_id": 5},
-    {"name": "LEAVES", "color": (80, 160, 80),   "voxel_id": 6},
-    {"name": "WOOD",   "color": (180, 140, 100), "voxel_id": 7},
-]
 
 class RadialMenu:
     def __init__(self):
         self.active = False
         self.center = (0, 0)
         self.selected_index = -1
-        self.options = RADIAL_MENU_OPTIONS
-        self.font = pg.font.SysFont('Consolas', 16, bold=True)  # bigger
+        self.menu_stack = []          # stack of option lists
+        self.current_options = None    # current level options
+        self.font = pg.font.SysFont('Consolas', 16, bold=True)
         self.pulse = 0.0
 
-    def activate(self, center):
+    def activate(self, center, top_level_options):
         self.active = True
         self.center = center
+        self.menu_stack = [top_level_options]
+        self.current_options = top_level_options
         self.selected_index = -1
         self.pulse = 0.0
 
     def deactivate(self):
         self.active = False
+        self.menu_stack = []
+        self.current_options = None
+
+    def push_submenu(self, options):
+        self.menu_stack.append(options)
+        self.current_options = options
+        self.selected_index = -1
+
+    def pop_submenu(self):
+        if len(self.menu_stack) > 1:
+            self.menu_stack.pop()
+            self.current_options = self.menu_stack[-1]
+            self.selected_index = -1
 
     def update_selection(self, screen_point):
-        """screen_point is a tuple (x, y) in screen pixels."""
         if not self.active:
             return
         dx = screen_point[0] - self.center[0]
@@ -49,7 +55,7 @@ class RadialMenu:
         angle = math.atan2(dy, dx)
         if angle < 0:
             angle += 2 * math.pi
-        n = len(self.options)
+        n = len(self.current_options)
         sector = int(angle / (2 * math.pi / n))
         self.selected_index = sector % n
 
@@ -57,7 +63,8 @@ class RadialMenu:
         if not self.active:
             return
         cx, cy = self.center
-        n = len(self.options)
+        options = self.current_options
+        n = len(options)
 
         # Outer glow ring (pulsing)
         glow_alpha = int(30 + 20 * math.sin(pulse_factor * 8))
@@ -69,7 +76,7 @@ class RadialMenu:
         surface.blit(bg_surf, (cx - RADIAL_MENU_RADIUS, cy - RADIAL_MENU_RADIUS))
 
         # Draw sectors
-        for i, option in enumerate(self.options):
+        for i, option in enumerate(options):
             start_angle = i * (2 * math.pi / n)
             end_angle = (i + 1) * (2 * math.pi / n)
             base_color = option["color"]
@@ -96,7 +103,7 @@ class RadialMenu:
         pg.draw.line(surface, (80, 90, 120, 150), (cx, cy), (line_x, line_y), 1)
 
         # Labels
-        for i, option in enumerate(self.options):
+        for i, option in enumerate(options):
             mid_angle = (i + 0.5) * (2 * math.pi / n)
             label_x = cx + math.cos(mid_angle) * (RADIAL_MENU_RADIUS * 0.7)
             label_y = cy + math.sin(mid_angle) * (RADIAL_MENU_RADIUS * 0.7)
@@ -120,7 +127,6 @@ class HUD:
         
         self.surface = pg.Surface(self.res, pg.SRCALPHA)
         pg.font.init()
-        # Larger fonts
         self.font = pg.font.SysFont('Consolas', 16)
         self.title_font = pg.font.SysFont('Consolas', 20, bold=True)
         self.big_font = pg.font.SysFont('Consolas', 26, bold=True)
@@ -162,7 +168,6 @@ class HUD:
         pg.draw.line(self.surface, color, (x, y - radius - length), (x, y - radius), 2)
         pg.draw.line(self.surface, color, (x, y + radius), (x, y + radius + length), 2)
 
-        # Label background (centered on text)
         label_surf = self.small_font.render(label, True, color)
         label_rect = label_surf.get_rect(midleft=(x + radius + 18, y - 10))
         bg_rect = label_rect.inflate(10, 4)
@@ -246,8 +251,11 @@ class HUD:
             else:
                 right_status = "BUILD"
             right_color = (100, 255, 100)
+        elif ar.is_grabbing:
+            right_status = "GRAB"
+            right_color = (255, 180, 80)
 
-        # Camera feed (bottom left) – larger frame
+        # Camera feed (bottom left)
         if hasattr(ar.ar, 'image') and ar.ar.image is not None:
             cam_surf = ar.ar.image
             cam_surf = pg.transform.smoothscale(cam_surf, (340, 190))
@@ -272,11 +280,10 @@ class HUD:
                 self.draw_text(f"x{voxel_handler.brush_mult:.2f}", (px + 45, py - 45), (255, 255, 80), self.small_font, anchor='center')
 
         # Radial menu
-        if ar.radial_menu_active and left_pos is not None:
-            # Menu is drawn by the radial_menu object itself
+        if ar.radial_menu_active:
             self.radial_menu.draw(self.surface, self.pulse_timer)
 
-        # ---- Top left system panel - larger, centered text ----
+        # ---- Top left system panel ----
         info_rect = pg.Rect(20, 20, 280, 190)
         self.draw_tech_panel(info_rect)
         y_offsets = [35, 60, 85, 110, 140, 165]
@@ -299,12 +306,17 @@ class HUD:
         for y, text, col in zip(y_offsets, texts, colors):
             self.draw_text(text, (info_rect.x + 20, y), col, self.font, anchor='topleft')
 
-        # ---- Top right panel (build/extrude) ----
+        # ---- Top right panel ----
         if voxel_handler.is_dragging:
             drag_rect = pg.Rect(self.res[0] - 220, 20, 200, 70)
             self.draw_tech_panel(drag_rect)
             self.draw_text_centered("EXTRUDING", drag_rect, (255, 180, 80), self.small_font, bg=(10, 10, 15, 200))
             self.draw_text(f"BRUSH {voxel_handler.brush_mult:.2f}", (drag_rect.centerx, drag_rect.bottom - 18), (255, 255, 100), self.small_font, anchor='center')
+        elif ar.is_grabbing:
+            grab_rect = pg.Rect(self.res[0] - 220, 20, 200, 70)
+            self.draw_tech_panel(grab_rect)
+            self.draw_text_centered("GRABBING", grab_rect, (255, 180, 80), self.small_font, bg=(10, 10, 15, 200))
+            self.draw_text(f"SIZE {ar.grab_size}", (grab_rect.centerx, grab_rect.bottom - 18), (255, 255, 100), self.small_font, anchor='center')
         else:
             build_rect = pg.Rect(self.res[0] - 220, 20, 200, 60)
             self.draw_tech_panel(build_rect)

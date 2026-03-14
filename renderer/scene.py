@@ -8,6 +8,7 @@ from world_objects.clouds import Clouds
 
 from utils.hud import HUD
 from world_objects.hand_renderer import HandRenderer
+from world_objects.ghost_region import GhostRegion
 
 class Scene:
     def __init__(self, engine):
@@ -20,6 +21,7 @@ class Scene:
         self.hand_left = HandRenderer(engine, 'LEFT')
         self.hand_right = HandRenderer(engine, 'RIGHT')
 
+        self.ghost_region = GhostRegion(engine)
         # ---> ADD THIS INITIALIZATION <---
         self.hud = HUD(engine)
 
@@ -49,6 +51,7 @@ class Scene:
 
         # voxel selection
         self.voxel_marker.render()
+        self.ghost_region.render()
 
         # ---> ADD THIS HUD RENDER PASS <---
         # Disable DEPTH_TEST so the 2D UI doesn't clip into 3D chunks

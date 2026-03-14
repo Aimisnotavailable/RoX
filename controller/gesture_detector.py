@@ -223,12 +223,39 @@ class PointDetector(BaseGestureDetector):
         others_down = True
         for tip_idx in other_tips:
             tip = landmarks[tip_idx]
-            mcp = landmarks[tip_idx - 3]  # approximate MCP index offset (works for middle, ring, pinky)
+            mcp = landmarks[tip_idx - 3]  # approximate MCP index offset
             if tip[1] < mcp[1]:
                 others_down = False
                 break
 
         return index_up and others_down, index_tip
+
+
+class FistDetector(BaseGestureDetector):
+    def __init__(self, hand_label, hold_frames=None):
+        super().__init__(hand_label, 'fist', hold_frames)
+
+    def _compute_raw_state(self, landmarks):
+        if len(landmarks) < 21:
+            return False, None
+
+        wrist = landmarks[WRIST_IDX]
+        finger_indices = [
+            (THUMB_TIP_IDX, THUMB_MCP_IDX),
+            (INDEX_TIP_IDX, INDEX_MCP_IDX),
+            (MIDDLE_TIP_IDX, MIDDLE_MCP_IDX),
+            (RING_TIP_IDX, RING_MCP_IDX),
+            (PINKY_TIP_IDX, PINKY_MCP_IDX)
+        ]
+
+        # All fingertips below (greater y) their MCP and below wrist
+        for tip_idx, mcp_idx in finger_indices:
+            tip = landmarks[tip_idx]
+            mcp = landmarks[mcp_idx]
+            if tip[1] <= mcp[1] or tip[1] <= wrist[1]:   # not curled enough
+                return False, None
+
+        return True, None
 
 
 class GestureManager:
