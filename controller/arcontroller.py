@@ -229,7 +229,6 @@ class ARController:
                             if not self.pinch_hold_emitted['RIGHT']:
                                 vh.set_voxel()
                             self.pinch_active_right = False
-
             # ----- TWO‑FINGER‑UP -----
             elif ev.gesture_name == 'two_finger_up':
                 get_logger_info('DEBUG', f'Two-finger-up {ev.hand} {ev.event_type} value={ev.value}')
@@ -316,10 +315,10 @@ class ARController:
             self.last_zoom_dist = None
 
         # Clean up pinch if hand disappeared
-        if not self.smooth_left_landmarks and self._hand_type_left == "REAL":
+        if not self.smooth_left_landmarks: # and self._hand_type_left == "REAL":
             self.pinch_active_left = False
             self.pinch_hold_emitted['LEFT'] = False
-        if not self.smooth_right_landmarks and self._hand_type_right == "REAL":
+        if not self.smooth_right_landmarks: # and self._hand_type_right == "REAL":
             self.pinch_active_right = False
             self.pinch_hold_emitted['RIGHT'] = False
 
