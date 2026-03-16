@@ -261,7 +261,10 @@ class ARController:
                     elif ev.event_type == 'END':
                         self.two_finger_up_right_active = False
                         self.two_finger_up_right_pos = None
-
+            
+            # TO-DO OPEN PALM RIGHT POINT RIGHT:
+            # BUILD A RAYCASTER THAT SHOWS THE VOXEL DETAILS OF A CHUNK OR A GROUP
+            # FOR IMMERSIVE LEARNING
             # ----- OPEN PALM (LEFT) -----
             elif ev.gesture_name == 'open_palm' and ev.hand == 'LEFT':
                 if ev.event_type == 'START':

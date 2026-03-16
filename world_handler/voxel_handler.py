@@ -110,6 +110,7 @@ class VoxelHandler:
 
                 # --- Depth scaling: speed factor ---
                 speed_factor = 1.0
+                # disable depth scaling
                 # if current_depth is not None:
                 #     speed_factor = max(Z_DRAG_SPEED_MIN, min(Z_DRAG_SPEED_MAX, 1.0 + (current_depth - 0.5) * 1.5))
 
