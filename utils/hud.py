@@ -6,7 +6,6 @@ import math
 import time
 from settings import WIN_RES, INTERACTION_MODE, INTERACTION_COLORS
 
-# Radial menu configuration – same techy look
 RADIAL_MENU_RADIUS = 160
 
 class RadialMenu:
@@ -149,9 +148,8 @@ class HUD:
         self.pulse_timer = 0.0
         self.radial_menu = RadialMenu()
 
-        # --- NEW: Temporary message ---
-        self.temp_message = None
-        self.temp_message_end_time = 0
+        # --- Animated message state ---
+        self.active_message = None          # dict with keys: text, start_time, duration, screen_pos
 
     def draw_tech_panel(self, rect, color=(15, 20, 30, 200), accent=(80, 140, 200, 150)):
         pg.draw.rect(self.surface, color, rect, border_radius=8)
@@ -206,10 +204,83 @@ class HUD:
             return int(pos.x * self.res[0]), int(pos.y * self.res[1])
         return int(pos[0]), int(pos[1])
 
-    # --- NEW: Show a temporary message ---
-    def show_temp_message(self, text, duration=3.0):
-        self.temp_message = text
-        self.temp_message_end_time = time.time() + duration
+    def show_temp_message(self, text, duration=3.0, screen_pos=None):
+        """Show an animated message at screen_pos (or bottom center if None)."""
+        self.active_message = {
+            'text': text,
+            'start_time': time.time(),
+            'duration': duration,
+            'screen_pos': screen_pos
+        }
+
+    def _draw_animated_message(self):
+        """Draw the message panel with scaling and fading animation."""
+        if not self.active_message:
+            return
+
+        now = time.time()
+        msg = self.active_message
+        elapsed = now - msg['start_time']
+
+        # If expired, clear it
+        if elapsed > msg['duration']:
+            self.active_message = None
+            return
+
+        # Animation parameters
+        anim_duration = 0.3                      # seconds to scale up
+        if elapsed < anim_duration:
+            progress = elapsed / anim_duration
+            # Ease‑out cubic with slight overshoot
+            if progress < 0.6:
+                # fast rise to 1.15
+                p2 = progress / 0.6
+                scale = 1.15 * p2 * p2                # quadratic in
+            else:
+                # ease back to 1.0
+                p2 = (progress - 0.6) / 0.4
+                scale = 1.15 - 0.15 * p2 * p2 * (3 - 2 * p2)  # smoothstep down
+            scale = max(0.01, scale)                 # never zero
+            alpha = int(255 * progress)               # fade in
+        else:
+            scale = 1.0
+            alpha = 255
+
+        # Determine panel position
+        if msg['screen_pos'] is not None:
+            center_x, center_y = msg['screen_pos']
+        else:
+            center_x, center_y = self.res[0] // 2, self.res[1] - 50   # bottom center fallback
+
+        # Render the panel
+        panel_width = 400
+        panel_height = 80
+        panel_surf = pg.Surface((panel_width, panel_height), pg.SRCALPHA)
+        panel_rect = panel_surf.get_rect()
+
+        # Draw tech panel background
+        bg_color = (15, 20, 30, alpha)
+        accent_color = (100, 150, 200, int(alpha*0.8))
+        pg.draw.rect(panel_surf, bg_color, panel_rect, border_radius=8)
+        inner_rect = panel_rect.inflate(-4, -4)
+        pg.draw.rect(panel_surf, (*bg_color[:3], int(alpha*0.3)), inner_rect, border_radius=6, width=1)
+        pg.draw.rect(panel_surf, accent_color, panel_rect, width=1, border_radius=8)
+
+        # Draw text
+        font = self.font
+        text_surf = font.render(msg['text'], True, (255, 255, 100))
+        # text_surf = pg.transform.scale(text_surf, (int(panel_surf.get_width() * 0.8), int(panel_surf.get_height() * 0.8)))
+        text_rect = text_surf.get_rect(center=panel_rect.center)
+        panel_surf.blit(text_surf, text_rect)
+
+        # Scale the panel surface (ensure dimensions >= 1)
+        scaled_width = max(1, int(panel_width * scale))
+        scaled_height = max(1, int(panel_height * scale))
+        scaled_surf = pg.transform.smoothscale(panel_surf, (scaled_width, scaled_height))
+        scaled_rect = scaled_surf.get_rect(center=(center_x, center_y))
+
+        # Draw onto main surface
+        self.surface.blit(scaled_surf, scaled_rect)
 
     def update_surface(self):
         self.surface.fill((0, 0, 0, 0))
@@ -340,16 +411,8 @@ class HUD:
         self.draw_text(f"L:{left_track}", (track_rect.x + 20, track_rect.y + 18), (100, 255, 100) if ar._hand_type_left == "REAL" else (180, 180, 180), self.small_font)
         self.draw_text(f"R:{right_track}", (track_rect.x + 20, track_rect.y + 38), (100, 255, 100) if ar._hand_type_right == "REAL" else (180, 180, 180), self.small_font)
 
-        # --- NEW: Temporary message display ---
-        if self.temp_message and time.time() < self.temp_message_end_time:
-            msg_surf = self.font.render(self.temp_message, True, (255, 255, 100))
-            msg_rect = msg_surf.get_rect(center=(self.res[0]//2, self.res[1]-50))
-            bg_rect = msg_rect.inflate(20, 10)
-            pg.draw.rect(self.surface, (10, 10, 20, 200), bg_rect, border_radius=8)
-            pg.draw.rect(self.surface, (100, 150, 200, 150), bg_rect, width=1, border_radius=8)
-            self.surface.blit(msg_surf, msg_rect)
-        elif self.temp_message and time.time() >= self.temp_message_end_time:
-            self.temp_message = None
+        # --- Animated message ---
+        self._draw_animated_message()
 
     def render(self):
         self.update_surface()

@@ -285,6 +285,7 @@ class ARController:
                 if ev.event_type == 'START':
                     if self.last_right_point_hit_pos is not None:
                         self.show_block_info(self.last_right_point_hit_pos)
+                        self.last_right_point_hit_pos = None
 
             # ----- POINT (LEFT) – menu navigation -----
             elif ev.gesture_name == 'point' and ev.hand == 'LEFT':
@@ -496,8 +497,8 @@ class ARController:
             self.grab_size = option["size"]
             self.close_radial_menu()
 
-    # ------------------------------------------------------------------
-    # NEW: Block info display (right‑hand open palm)
+   # ------------------------------------------------------------------
+    # UPDATED: Block info display with screen position
     # ------------------------------------------------------------------
     def show_block_info(self, world_pos):
         """Display information about the block at world_pos."""
@@ -508,9 +509,15 @@ class ARController:
         if voxel_id != 0:
             block_name = {1:"SAND",2:"GRASS",3:"DIRT",4:"STONE",
                           5:"SNOW",6:"LEAVES",7:"WOOD"}.get(voxel_id, "UNKNOWN")
-            info = f"{block_name} (ID:{voxel_id}) at {list(world_pos)})"
+            info = f"{block_name} (ID:{voxel_id}) at {list(world_pos)}"
             # get_logger_info('BLOCK INFO', info)
             if hasattr(self.engine.scene, 'hud'):
-                self.engine.scene.hud.show_temp_message(info, duration=3.0)
+                # Compute screen position of right hand (if available)
+                screen_pos = None
+                if self.smooth_right_pos is not None:
+                    screen_x = self.smooth_right_pos.x * WIN_RES[0]
+                    screen_y = self.smooth_right_pos.y * WIN_RES[1]
+                    screen_pos = (screen_x, screen_y)
+                self.engine.scene.hud.show_temp_message(info, duration=3.0, screen_pos=screen_pos)
         else:
             get_logger_info('BLOCK INFO', f"No block at {world_pos}")
