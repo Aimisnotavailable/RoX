@@ -4,7 +4,7 @@ import moderngl as mgl
 import array
 import math
 import time
-from settings import WIN_RES, INTERACTION_MODE
+from settings import WIN_RES, INTERACTION_MODE, INTERACTION_COLORS
 
 # Radial menu configuration – same techy look
 RADIAL_MENU_RADIUS = 160
@@ -149,6 +149,10 @@ class HUD:
         self.pulse_timer = 0.0
         self.radial_menu = RadialMenu()
 
+        # --- NEW: Temporary message ---
+        self.temp_message = None
+        self.temp_message_end_time = 0
+
     def draw_tech_panel(self, rect, color=(15, 20, 30, 200), accent=(80, 140, 200, 150)):
         pg.draw.rect(self.surface, color, rect, border_radius=8)
         inner_rect = rect.inflate(-4, -4)
@@ -201,6 +205,11 @@ class HUD:
         if hasattr(pos, 'x') and pos.x <= 2.0 and pos.y <= 2.0:
             return int(pos.x * self.res[0]), int(pos.y * self.res[1])
         return int(pos[0]), int(pos[1])
+
+    # --- NEW: Show a temporary message ---
+    def show_temp_message(self, text, duration=3.0):
+        self.temp_message = text
+        self.temp_message_end_time = time.time() + duration
 
     def update_surface(self):
         self.surface.fill((0, 0, 0, 0))
@@ -298,7 +307,7 @@ class HUD:
         colors = [
             (255, 255, 100),
             (200, 220, 255),
-            (100, 255, 100) if mode_str == "ADD" else (255, 100, 100),
+            INTERACTION_COLORS[voxel_handler.interaction_mode],
             (180, 180, 220),
             left_color,
             right_color
@@ -330,6 +339,17 @@ class HUD:
         right_track = "REAL" if ar._hand_type_right == "REAL" else "GHOST"
         self.draw_text(f"L:{left_track}", (track_rect.x + 20, track_rect.y + 18), (100, 255, 100) if ar._hand_type_left == "REAL" else (180, 180, 180), self.small_font)
         self.draw_text(f"R:{right_track}", (track_rect.x + 20, track_rect.y + 38), (100, 255, 100) if ar._hand_type_right == "REAL" else (180, 180, 180), self.small_font)
+
+        # --- NEW: Temporary message display ---
+        if self.temp_message and time.time() < self.temp_message_end_time:
+            msg_surf = self.font.render(self.temp_message, True, (255, 255, 100))
+            msg_rect = msg_surf.get_rect(center=(self.res[0]//2, self.res[1]-50))
+            bg_rect = msg_rect.inflate(20, 10)
+            pg.draw.rect(self.surface, (10, 10, 20, 200), bg_rect, border_radius=8)
+            pg.draw.rect(self.surface, (100, 150, 200, 150), bg_rect, width=1, border_radius=8)
+            self.surface.blit(msg_surf, msg_rect)
+        elif self.temp_message and time.time() >= self.temp_message_end_time:
+            self.temp_message = None
 
     def render(self):
         self.update_surface()

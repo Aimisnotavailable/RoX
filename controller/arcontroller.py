@@ -48,6 +48,7 @@ class ARController:
         self.gesture_manager.add_detector(TwoFingerUpDetector('LEFT', hold_frames=None, require_others_down=True))
         self.gesture_manager.add_detector(TwoFingerUpDetector('RIGHT', hold_frames=None, require_others_down=True))
         self.gesture_manager.add_detector(OpenPalmDetector('LEFT', hold_frames=15))
+        self.gesture_manager.add_detector(OpenPalmDetector('RIGHT', hold_frames=15))   # ADDED FOR RIGHT HAND
         self.gesture_manager.add_detector(PointDetector('LEFT', hold_frames=None))
         self.gesture_manager.add_detector(PointDetector('RIGHT', hold_frames=None))
 
@@ -97,6 +98,9 @@ class ARController:
 
         # Right hand point hit (for grab target)
         self.right_point_hit_pos = None
+
+        # --- NEW: last block pointed at by right hand (for block info) ---
+        self.last_right_point_hit_pos = None
 
         # Open palm anti‑reopen
         self._open_palm_active = False
@@ -262,9 +266,6 @@ class ARController:
                         self.two_finger_up_right_active = False
                         self.two_finger_up_right_pos = None
             
-            # TO-DO OPEN PALM RIGHT POINT RIGHT:
-            # BUILD A RAYCASTER THAT SHOWS THE VOXEL DETAILS OF A CHUNK OR A GROUP
-            # FOR IMMERSIVE LEARNING
             # ----- OPEN PALM (LEFT) -----
             elif ev.gesture_name == 'open_palm' and ev.hand == 'LEFT':
                 if ev.event_type == 'START':
@@ -279,6 +280,12 @@ class ARController:
                     self._open_palm_active = False
                     self._open_palm_used_to_close = False
 
+            # ----- OPEN PALM (RIGHT) – show block info -----
+            elif ev.gesture_name == 'open_palm' and ev.hand == 'RIGHT':
+                if ev.event_type == 'START':
+                    if self.last_right_point_hit_pos is not None:
+                        self.show_block_info(self.last_right_point_hit_pos)
+
             # ----- POINT (LEFT) – menu navigation -----
             elif ev.gesture_name == 'point' and ev.hand == 'LEFT':
                 if ev.event_type == 'UPDATE' and ev.value is not None and self.radial_menu_active:
@@ -286,10 +293,13 @@ class ARController:
                     screen_y = ev.value[1] * WIN_RES[1]
                     self.engine.scene.hud.radial_menu.update_selection((screen_x, screen_y))
 
-            # ----- POINT (RIGHT) – grab target -----
+            # ----- POINT (RIGHT) – grab target and store last hit -----
             elif ev.gesture_name == 'point' and ev.hand == 'RIGHT':
-                if ev.event_type == 'UPDATE' and ev.value is not None:
+                vh = self.engine.scene.world.voxel_handler
+                if ev.event_type == 'UPDATE' and ev.value is not None and vh.interaction_mode == 3:
                     self.right_point_hit_pos = self.get_block_under_hand(self.smooth_right_landmarks)
+                    if self.right_point_hit_pos is not None:
+                        self.last_right_point_hit_pos = self.right_point_hit_pos
 
         # Update smoothed positions for crosshair
         self.smooth_left_pos = self.smooth_left_landmarks[8] if len(self.smooth_left_landmarks) > 8 else None
@@ -485,3 +495,22 @@ class ARController:
         elif "size" in option:
             self.grab_size = option["size"]
             self.close_radial_menu()
+
+    # ------------------------------------------------------------------
+    # NEW: Block info display (right‑hand open palm)
+    # ------------------------------------------------------------------
+    def show_block_info(self, world_pos):
+        """Display information about the block at world_pos."""
+        if world_pos is None:
+            return
+        vh = self.engine.scene.world.voxel_handler
+        voxel_id, idx, local_pos, chunk = vh.get_voxel_id(world_pos)
+        if voxel_id != 0:
+            block_name = {1:"SAND",2:"GRASS",3:"DIRT",4:"STONE",
+                          5:"SNOW",6:"LEAVES",7:"WOOD"}.get(voxel_id, "UNKNOWN")
+            info = f"{block_name} (ID:{voxel_id}) at {list(world_pos)})"
+            # get_logger_info('BLOCK INFO', info)
+            if hasattr(self.engine.scene, 'hud'):
+                self.engine.scene.hud.show_temp_message(info, duration=3.0)
+        else:
+            get_logger_info('BLOCK INFO', f"No block at {world_pos}")

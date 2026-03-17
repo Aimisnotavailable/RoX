@@ -43,9 +43,11 @@ class VoxelHandler:
         
         if not self.is_dragging:
             if self.engine.player.mode == "FPS":
-                if self.interaction_mode != 2:
+                if self.interaction_mode < 2:
                     self.raycast_fps(self.engine.player.position, self.engine.player.forward)
                 elif self.interaction_mode == 2 and not ar_controller.is_grabbing:
+                    self.ray_cast_from_hands()
+                else:
                     self.ray_cast_from_hands()
             elif self.engine.player.mode == "RTS":
                 ray_origin, ray_direction = self.get_rts_ray(screen_pos=ar_mouse_pos)
@@ -226,7 +228,7 @@ class VoxelHandler:
         local_origin = glm.vec3(inv_model * glm.vec4(origin, 1.0))
         local_dir = glm.normalize(glm.vec3(inv_model * glm.vec4(direction, 0.0)))
 
-        max_dist = 60.0 if is_rts else 8.0
+        max_dist = 60.0 if is_rts else 12.0
         x1, y1, z1 = local_origin
         x2, y2, z2 = local_origin + local_dir * max_dist
 
@@ -290,10 +292,9 @@ class VoxelHandler:
             return
 
         if self.voxel_id:
-            get_logger_info('DEBUG', f'set_voxel: mode {"ADD" if self.interaction_mode else "REMOVE"} at {self.voxel_world_pos}')
-            if self.interaction_mode:
+            if self.interaction_mode == 1:
                 self.add_voxel()
-            else:
+            elif self.interaction_mode == 0:
                 self.remove_voxel()
         else:
             get_logger_info('DEBUG', 'set_voxel: no voxel targeted')
