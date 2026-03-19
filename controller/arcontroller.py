@@ -14,6 +14,11 @@ from controller.gesture_detector import (
 )
 from scripts.logger import get_logger_info
 
+## TO-DO
+## FIX THE GESTURE LOCK
+## IMPLEMENT HEAD-COUPLING
+## TAKE GIF VIDS
+
 TOP_MENU = [
     {"name": "BLOCKS", "color": (200,200,200), "submenu": [
         {"name": "SAND",   "color": (230,210,180), "voxel_id": 1},
