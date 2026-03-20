@@ -58,7 +58,7 @@ class Scene:
         self.engine.ctx.disable(mgl.DEPTH_TEST)
         self.engine.ctx.enable(mgl.BLEND)
         
-        self.hud.render()
+        # self.hud.render()
         
         # Re-enable DEPTH_TEST for the next frame
         self.engine.ctx.enable(mgl.DEPTH_TEST)

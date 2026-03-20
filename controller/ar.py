@@ -1,4 +1,10 @@
 # scripts/ar.py
+"""
+Augmented Reality hand tracking module with ghost frame generation and drift detection.
+Combines MediaPipe hand landmarks with optical flow and kinematic prediction to maintain
+hand presence during temporary occlusions.
+"""
+
 from configs.arconfig import *
 import math
 import cv2
@@ -7,7 +13,14 @@ import numpy as np
 import mediapipe as mp
 from collections import deque
 
-# --- AR CLASS (3D) ---
+# Additional configuration (can be moved to arconfig.py)
+DRIFT_THRESHOLD = 0.05          # normalized distance for drift detection
+FLOW_POINT_INDICES = [0, 5, 17, 8, 20]  # wrist, index MCP, pinky MCP, index tip, pinky tip
+EMA_ALPHA = 0.3                  # smoothing factor for velocity
+CONSTANT_VELOCITY_FRAMES = 3     # use constant velocity for first N frames after loss
+MAX_SCALE_CHANGE = 0.5           # maximum allowed scale factor change per frame
+
+
 class AR:
     SOURCE_REAL = "real"
     SOURCE_GHOST = "ghost"
@@ -22,38 +35,42 @@ class AR:
             min_detection_confidence=0.7
         )
 
-        # Each entry in the histogram:
-        #   "pts": list of (x_norm, y_norm, z_norm) for 21 landmarks
-        #   "source": "real" or "ghost"
-        #   "frame": self.frame_count
-        #   "gen_frame": for ghosts, the frame they were generated (for aging)
+        # Histogram stores hand states over time.
+        # Each entry: {"pts": list of (x_norm, y_norm, z_norm) for 21 landmarks,
+        #              "source": "real" or "ghost",
+        #              "frame": self.frame_count,
+        #              "gen_frame": for ghosts, frame of generation (for aging)}
         self.position_histogram = {'LEFT': [], 'RIGHT': []}
         self.hands_tracker     = {'LEFT': 0,      'RIGHT': 0     }
         self.presence_counter = {'LEFT': 0, 'RIGHT': 0}
-        self.presence_threshold_on = 2   
-        self.presence_threshold_off = -2 
+        self.presence_threshold_on = 2
+        self.presence_threshold_off = -2
         self.pinch_absent_reset = max(3, HISTOGRAM_SIZE // 2)
-        
-        # --- GHOST KINEMATICS & TTL ---
+
+        # Ghost kinematics & TTL
         self.ghost_velocity = {'LEFT': [0.0]*6, 'RIGHT': [0.0]*6}
-        self.KINEMATIC_FRICTION = 0.85 
-        self.MAX_GHOST_TTL = 15  
-        self.absent_reset_threshold = max(HISTOGRAM_SIZE, self.MAX_GHOST_TTL + 1) 
+        self.KINEMATIC_FRICTION = 0.85
+        self.MAX_GHOST_TTL = 15
+        self.absent_reset_threshold = max(HISTOGRAM_SIZE, self.MAX_GHOST_TTL + 1)
         self.ghost_ttl_counter = {'LEFT': 0, 'RIGHT': 0}
         self.ghost_age_default = 2
-        
-        # --- OPTICAL FLOW (2D pixel tracking) ---
+
+        # Optical flow (2D pixel tracking) – now uses multiple points
         self.prev_gray = None
         self.lk_params = dict(
-            winSize=(25, 25), 
+            winSize=(25, 25),
             maxLevel=3,
             criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03)
         )
-        self.lk_tracked_points = {'LEFT': None, 'RIGHT': None}
+        self.lk_tracked_points = {'LEFT': None, 'RIGHT': None}   # shape (n,1,2)
+
+        # Cached hand orientation (for last real frame)
+        self.last_hand_dir = {'LEFT': None, 'RIGHT': None}
+        self.last_hand_normal = {'LEFT': None, 'RIGHT': None}
 
         self.frame_count = 0
 
-        # ar_data now contains only 3D points, hand type, and scale
+        # ar_data contains only 3D points, hand type, and scale
         self.ar_data = {
             "POSITION_DATA": {"LEFT": [], "RIGHT": []},   # list of (x,y,z)
             "SCALE":         {"LEFT": 1,    "RIGHT": 1},
@@ -73,7 +90,7 @@ class AR:
         get_logger_info(level, msg)
 
     # ------------------------------------------------------------------
-    # Landmark validation (now checks z as well)
+    # Landmark validation
     # ------------------------------------------------------------------
     def _valid_landmark(self, lm):
         try:
@@ -99,7 +116,6 @@ class AR:
             except Exception:
                 pts.append((0.0, 0.0, 0.0))
                 continue
-
             pts.append((lx, ly, lz))
 
         entry = {
@@ -107,7 +123,7 @@ class AR:
             "source": self.SOURCE_GHOST if is_generated else self.SOURCE_REAL,
             "frame": self.frame_count
         }
-        
+
         if is_generated:
             gen_frame = getattr(landmarks, "_meta_gen_frame", None)
             entry["gen_frame"] = gen_frame if gen_frame is not None else self.frame_count
@@ -138,11 +154,11 @@ class AR:
             else:
                 hist.pop(0)
                 hist.append(entry)
-        
+
         return pts
 
     # ------------------------------------------------------------------
-    # Ghost pruning by age (unchanged)
+    # Ghost pruning by age
     # ------------------------------------------------------------------
     def _prune_ghosts_by_age(self, label):
         hist = self.position_histogram[label]
@@ -167,7 +183,7 @@ class AR:
         return changed
 
     # ------------------------------------------------------------------
-    # 2D angle helpers (used by optical flow)
+    # 2D angle helpers
     # ------------------------------------------------------------------
     def _angle_between(self, a, b):
         return math.atan2(b[1], b[0]) - math.atan2(a[1], a[0])
@@ -180,7 +196,7 @@ class AR:
         return ang
 
     # ------------------------------------------------------------------
-    # 3D geometry helpers (unchanged)
+    # 3D geometry helpers
     # ------------------------------------------------------------------
     def _normalize(self, v):
         length = math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2])
@@ -222,6 +238,7 @@ class AR:
         return (rx + center[0], ry + center[1], rz + center[2])
 
     def _compute_hand_orientation(self, pts):
+        """Return (hand_dir, normal) from landmark points."""
         wrist = pts[WRIST_IDX]
         mcp_mid = pts[MIDDLE_MCP_IDX]
         hand_dir = (mcp_mid[0]-wrist[0], mcp_mid[1]-wrist[1], mcp_mid[2]-wrist[2])
@@ -240,7 +257,7 @@ class AR:
         return hand_dir, normal
 
     # ------------------------------------------------------------------
-    # 3D velocity estimation (unchanged)
+    # 3D velocity estimation (uses cached orientation if available)
     # ------------------------------------------------------------------
     def calculate_velocity(self, label, dir=0, window=4):
         hist = self.position_histogram[label]
@@ -253,6 +270,7 @@ class AR:
             if isinstance(pts, list) and len(pts) > max(WRIST_IDX, MIDDLE_MCP_IDX, INDEX_MCP_IDX, PINKY_MCP_IDX):
                 wrist = pts[WRIST_IDX]
                 if wrist:
+                    # Use cached orientation if available for this frame? For simplicity, compute fresh.
                     hand_dir, normal = self._compute_hand_orientation(pts)
                     valid.append((wrist, hand_dir, normal))
                     frames.append(int(e.get("frame", self.frame_count)))
@@ -344,7 +362,7 @@ class AR:
         return None
 
     # ------------------------------------------------------------------
-    # Ghost generation helpers (unchanged)
+    # Ghost generation helpers
     # ------------------------------------------------------------------
     def _normalize_ghost_genframes(self, label):
         hist = self.position_histogram.get(label, [])
@@ -363,12 +381,12 @@ class AR:
             self.hands_tracker[b_label], self.hands_tracker[a_label]
         self.presence_counter[a_label], self.presence_counter[b_label] = \
             self.presence_counter[b_label], self.presence_counter[a_label]
-        
+
         self.ghost_ttl_counter[a_label], self.ghost_ttl_counter[b_label] = \
             self.ghost_ttl_counter[b_label], self.ghost_ttl_counter[a_label]
         self.ghost_velocity[a_label], self.ghost_velocity[b_label] = \
             self.ghost_velocity[b_label], self.ghost_velocity[a_label]
-            
+
         self.lk_tracked_points[a_label], self.lk_tracked_points[b_label] = \
             self.lk_tracked_points[b_label], self.lk_tracked_points[a_label]
 
@@ -377,9 +395,8 @@ class AR:
 
     def _get_continuous_streak(self, label):
         hist = self.position_histogram.get(label, [])
-        if not hist: 
+        if not hist:
             return 0
-        
         streak = 1
         last_f = hist[-1].get("frame", -1)
         for i in range(len(hist)-2, -1, -1):
@@ -412,7 +429,7 @@ class AR:
             else:
                 tracked_px[label] = None
 
-        MAX_JUMP = max(self.W, self.H) * 0.10 
+        MAX_JUMP = max(self.W, self.H) * 0.10
         assigned_blobs = set()
         assigned_labels = set()
         final_assignments = {}
@@ -431,7 +448,7 @@ class AR:
                             dist += (MAX_JUMP * 0.6)
                     if dist < MAX_JUMP:
                         pairs.append((dist, b_idx, label))
-        
+
         pairs.sort(key=lambda x: x[0])
         for dist, b_idx, label in pairs:
             if b_idx not in assigned_blobs and label not in assigned_labels:
@@ -440,7 +457,7 @@ class AR:
                 assigned_labels.add(label)
 
         unassigned_blobs = [b for b in blobs if b[0] not in assigned_blobs]
-        
+
         # Duplicate hand filter
         filtered_unassigned = []
         for b in unassigned_blobs:
@@ -465,7 +482,7 @@ class AR:
 
         # Fallback assignment
         if len(unassigned_blobs) == 2 and len(assigned_labels) == 0:
-            label_0 = unassigned_blobs[0][1] 
+            label_0 = unassigned_blobs[0][1]
             label_1 = unassigned_blobs[1][1]
             if label_0 != label_1 and label_0 in ["LEFT", "RIGHT"] and label_1 in ["LEFT", "RIGHT"]:
                 final_assignments[unassigned_blobs[0][0]] = label_0
@@ -481,7 +498,7 @@ class AR:
             for b_idx, orig_label, wrist_px, _ in unassigned_blobs:
                 avail_labels = [L for L in ["LEFT", "RIGHT"] if L not in assigned_labels]
                 if not avail_labels:
-                    break 
+                    break
                 if orig_label in avail_labels:
                     label = orig_label
                 elif len(avail_labels) == 1:
@@ -502,12 +519,12 @@ class AR:
         detections[:] = valid_detections
 
     # ------------------------------------------------------------------
-    # Ghost frame generator (3D) (unchanged)
+    # Ghost frame generator (3D)
     # ------------------------------------------------------------------
     def generate_frames(self, velocity, label):
         hist = self.position_histogram[label]
-        
-        if len(hist) > 0 :
+
+        if len(hist) > 0:
             base_entry = hist[-1]
             base_pts = base_entry.get("pts", []) or []
         else:
@@ -555,7 +572,7 @@ class AR:
         lin_speed = math.sqrt(vx**2 + vy**2 + vz**2)
         ang_speed = math.sqrt(ax**2 + ay**2 + az**2)
         speed_factor = lin_speed + ang_speed * 50.0
-        
+
         min_age = 1
         max_age = max(1, int(self.ghost_age_default))
         adaptive_age = int(max(min_age, min(max_age, self.ghost_age_default // (1 + int(speed_factor)))))
@@ -571,20 +588,100 @@ class AR:
         hist = self.position_histogram[label]
         if not hist:
             return False
-            
+
         changed = False
         pure_real_hist = [e for e in hist if e.get("source") == self.SOURCE_REAL]
-        
+
         if len(pure_real_hist) != len(hist):
             changed = True
-            
+
         self.position_histogram[label].clear()
         self.position_histogram[label].extend(pure_real_hist)
-        
+
         return changed
 
     # ------------------------------------------------------------------
-    # Pygame helpers (unchanged)
+    # Compute velocity from optical flow points (multiple landmarks)
+    # ------------------------------------------------------------------
+    def _compute_flow_velocity(self, old_points, new_points, label):
+        """
+        old_points, new_points: numpy arrays of shape (n,1,2) in pixel coordinates.
+        Returns (vx, vy, vz, ax, ay, az) in normalized units.
+        """
+        # Extract wrist (first point) and other points
+        old_wrist = old_points[0, 0]      # (x,y)
+        new_wrist = new_points[0, 0]
+        dx_px = new_wrist[0] - old_wrist[0]
+        dy_px = new_wrist[1] - old_wrist[1]
+        dx_norm = dx_px / self.W
+        dy_norm = dy_px / self.H
+
+        # Estimate depth change from scale change (using all points)
+        old_dists = []
+        new_dists = []
+        for i in range(1, len(old_points)):
+            p_old = old_points[i, 0]
+            p_new = new_points[i, 0]
+            old_d = math.hypot(p_old[0] - old_wrist[0], p_old[1] - old_wrist[1])
+            new_d = math.hypot(p_new[0] - new_wrist[0], p_new[1] - new_wrist[1])
+            if old_d > 0:
+                old_dists.append(old_d)
+                new_dists.append(new_d)
+
+        if old_dists:
+            # Use median to be robust
+            median_old = np.median(old_dists)
+            median_new = np.median(new_dists)
+            scale_factor = median_new / median_old if median_old > 0 else 1.0
+            # Clamp scale factor
+            scale_factor = max(1.0 - MAX_SCALE_CHANGE, min(1.0 + MAX_SCALE_CHANGE, scale_factor))
+            dz_norm = -(scale_factor - 1.0) * 0.1   # heuristic
+        else:
+            dz_norm = 0.0
+
+        # Estimate 2D rotation (around Z) from average angle change
+        angles = []
+        for i in range(1, len(old_points)):
+            v_old = old_points[i, 0] - old_wrist
+            v_new = new_points[i, 0] - new_wrist
+            if not (v_old[0] == 0 and v_old[1] == 0) and not (v_new[0] == 0 and v_new[1] == 0):
+                ang = math.atan2(v_new[1], v_new[0]) - math.atan2(v_old[1], v_old[0])
+                angles.append(self._normalize_angle(ang))
+        angle2d = np.median(angles) if angles else 0.0
+
+        # Angular velocities around X and Y are not directly observable from 2D flow; set to zero.
+        # They will be handled by kinematic decay.
+        return [dx_norm, dy_norm, dz_norm, 0.0, 0.0, angle2d]
+
+    # ------------------------------------------------------------------
+    # Drift detection: compare predicted wrist from previous ghost with flow-based wrist
+    # ------------------------------------------------------------------
+    def _check_drift(self, label, new_wrist_norm):
+        """Return True if drift detected."""
+        hist = self.position_histogram[label]
+        if len(hist) < 2:
+            return False
+        last_entry = hist[-1]
+        if last_entry.get("source") != self.SOURCE_GHOST:
+            return False
+        last_pts = last_entry.get("pts", [])
+        if len(last_pts) <= WRIST_IDX:
+            return False
+        last_wrist = last_pts[WRIST_IDX]
+
+        # Predicted wrist = last_wrist + current velocity (linear part)
+        vx, vy, vz, _, _, _ = self.ghost_velocity[label]
+        predicted = (last_wrist[0] + vx, last_wrist[1] + vy, last_wrist[2] + vz)
+
+        # Euclidean distance in normalized coordinates (ignoring Z for simplicity)
+        dist = math.hypot(predicted[0] - new_wrist_norm[0], predicted[1] - new_wrist_norm[1])
+        if dist > DRIFT_THRESHOLD:
+            self._log('CORE', f"Drift detected for {label}: dist={dist:.3f}", True)
+            return True
+        return False
+
+    # ------------------------------------------------------------------
+    # Pygame helpers
     # ------------------------------------------------------------------
     def cvimage_to_pygame(self, image):
         size = image.shape[1::-1]
@@ -604,7 +701,7 @@ class AR:
             return
 
         self.frame_count += 1
-        
+
         current_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         ar_data = {
@@ -643,18 +740,23 @@ class AR:
                 # Get 3D normalized landmarks
                 landmarks_norm = [(lm.x, lm.y, lm.z) for lm in lm_set.landmark]
 
-                if self.presence_counter[label] < self.presence_threshold_on:
-                    # not yet stable, but we still store landmarks
-                    pass
+                # Cache hand orientation for later use
+                if len(landmarks_norm) > max(WRIST_IDX, MIDDLE_MCP_IDX, INDEX_MCP_IDX, PINKY_MCP_IDX):
+                    hand_dir, normal = self._compute_hand_orientation(landmarks_norm)
+                    self.last_hand_dir[label] = hand_dir
+                    self.last_hand_normal[label] = normal
 
+                # Store points in histogram (real)
                 pts = self.calculate_hand_points(lm_set, label, is_generated=False)
-                
-                # Update optical flow points (pixel coordinates)
-                w_norm = landmarks_norm[WRIST_IDX]
-                m_norm = landmarks_norm[MIDDLE_MCP_IDX]
-                w_px = (w_norm[0] * self.W, w_norm[1] * self.H)
-                m_px = (m_norm[0] * self.W, m_norm[1] * self.H)
-                self.lk_tracked_points[label] = np.array([[w_px], [m_px]], dtype=np.float32)
+
+                # Update optical flow points for future loss (multiple points)
+                flow_pts_px = []
+                for idx in FLOW_POINT_INDICES:
+                    if idx < len(landmarks_norm):
+                        x_norm, y_norm, _ = landmarks_norm[idx]
+                        flow_pts_px.append([x_norm * self.W, y_norm * self.H])
+                if len(flow_pts_px) == len(FLOW_POINT_INDICES):
+                    self.lk_tracked_points[label] = np.array(flow_pts_px, dtype=np.float32).reshape(-1, 1, 2)
 
                 try:
                     self._prune_ghosts_on_real(label)
@@ -684,8 +786,9 @@ class AR:
                 self.presence_counter[label] = max(self.presence_threshold_off, self.presence_counter[label] - 1)
 
                 ghost_pts = []
-                
+
                 if self.hands_tracker[label] == 1:
+                    # Just lost: compute initial velocity from recent real frames
                     real_hist = [e for e in self.position_histogram[label] if e.get("source") == self.SOURCE_REAL]
                     if len(real_hist) >= 3:
                         self.ghost_velocity[label] = self.calculate_velocity(label, dir=1)
@@ -694,68 +797,86 @@ class AR:
                         self.ghost_velocity[label] = [0.0]*6
                         self.ghost_ttl_counter[label] = 0
                         self.lk_tracked_points[label] = None
-                    
+
                 if self.ghost_ttl_counter[label] > 0 and self.hands_tracker[label] < self.absent_reset_threshold:
                     flow_success = False
-                    
-                    # Attempt optical flow
-                    if self.lk_tracked_points[label] is not None and self.prev_gray is not None:
-                        p1, st, err = cv2.calcOpticalFlowPyrLK(
-                            self.prev_gray, current_gray, self.lk_tracked_points[label], None, **self.lk_params
-                        )
-                        if st is not None and len(st) == 2 and st[0][0] == 1 and st[1][0] == 1:
-                            p0 = self.lk_tracked_points[label].reshape(2, 2)
-                            p1_flat = p1.reshape(2, 2)
-                            
-                            dx_px = p1_flat[0][0] - p0[0][0]
-                            dy_px = p1_flat[0][1] - p0[0][1]
-                            dx_norm = dx_px / self.W
-                            dy_norm = dy_px / self.H
-                            
-                            old_dist_px = math.hypot(p0[1][0]-p0[0][0], p0[1][1]-p0[0][1])
-                            new_dist_px = math.hypot(p1_flat[1][0]-p1_flat[0][0], p1_flat[1][1]-p1_flat[0][1])
-                            scale_factor = new_dist_px / old_dist_px if old_dist_px > 0 else 1.0
-                            dz_norm = -(scale_factor - 1.0) * 0.1
-                            
-                            v_old = (p0[1][0]-p0[0][0], p0[1][1]-p0[0][1])
-                            v_new = (p1_flat[1][0]-p1_flat[0][0], p1_flat[1][1]-p1_flat[0][1])
-                            angle2d = 0.0
-                            if not ((v_old[0]==0 and v_old[1]==0) or (v_new[0]==0 and v_new[1]==0)):
-                                angle2d = math.atan2(v_new[1], v_new[0]) - math.atan2(v_old[1], v_old[0])
-                                angle2d = self._normalize_angle(angle2d)
-                            
-                            vel = [dx_norm, dy_norm, dz_norm, 0.0, 0.0, angle2d]
-                            ghost = self.generate_frames(vel, label)
-                            self.ghost_velocity[label] = vel 
-                            self.lk_tracked_points[label] = p1
-                            flow_success = True
-                            self._log('CORE', f'OPTICAL FLOW TRACKED {label}', True)
+                    measured_vel = None
 
-                    # Fallback to kinematic friction
-                    if not flow_success:
+                    # Attempt optical flow if we have previous points
+                    if self.lk_tracked_points[label] is not None and self.prev_gray is not None:
+                        # Ensure we have enough points
+                        if len(self.lk_tracked_points[label]) >= 2:
+                            p1, st, err = cv2.calcOpticalFlowPyrLK(
+                                self.prev_gray, current_gray,
+                                self.lk_tracked_points[label], None,
+                                **self.lk_params
+                            )
+                            # Check status: all points should be tracked
+                            if st is not None and np.all(st == 1):
+                                # Compute velocity from flow
+                                measured_vel = self._compute_flow_velocity(
+                                    self.lk_tracked_points[label], p1, label
+                                )
+
+                                # Get new wrist (first point) normalized for drift check
+                                new_wrist_px = p1[0, 0]
+                                new_wrist_norm = (new_wrist_px[0] / self.W, new_wrist_px[1] / self.H, 0.0)
+
+                                # Drift detection
+                                if self._check_drift(label, new_wrist_norm):
+                                    # Drift detected – fall back to kinematic
+                                    self._log('CORE', f"Flow drifted for {label}, falling back to kinematic", True)
+                                    flow_success = False
+                                else:
+                                    # Validate scale change
+                                    # (Already clamped in _compute_flow_velocity)
+                                    flow_success = True
+                                    self.lk_tracked_points[label] = p1
+                                    self._log('CORE', f'OPTICAL FLOW TRACKED {label}', True)
+                            else:
+                                self._log('CORE', f'Optical flow lost some points for {label}', True)
+
+                    if flow_success and measured_vel is not None:
+                        # Smooth velocity with EMA
+                        old_vel = self.ghost_velocity[label]
+                        smoothed = [EMA_ALPHA * measured_vel[i] + (1 - EMA_ALPHA) * old_vel[i] for i in range(6)]
+                        self.ghost_velocity[label] = smoothed
+                    else:
+                        # Fallback: kinematic friction or constant velocity
                         vx, vy, vz, ax, ay, az = self.ghost_velocity[label]
                         speed = math.sqrt(vx**2 + vy**2 + vz**2)
-                        if speed < 0.001:
-                            self.ghost_velocity[label] = [0.0]*6
-                            self._log('CORE', f'KINEMATIC HALT FOR {label}', True)
-                            if self.ghost_ttl_counter[label] > 3:
-                                self.ghost_ttl_counter[label] = 3
-                        else:
-                            self.ghost_velocity[label][0] *= self.KINEMATIC_FRICTION
-                            self.ghost_velocity[label][1] *= self.KINEMATIC_FRICTION
-                            self.ghost_velocity[label][2] *= self.KINEMATIC_FRICTION
-                            self.ghost_velocity[label][3] *= (self.KINEMATIC_FRICTION * 0.7)
-                            self.ghost_velocity[label][4] *= (self.KINEMATIC_FRICTION * 0.7)
-                            self.ghost_velocity[label][5] *= (self.KINEMATIC_FRICTION * 0.7)
-                            self._log('CORE', f'KINEMATIC DECAY FOR {label}', True)
 
-                        vel = self.ghost_velocity[label]
-                        ghost = self.generate_frames(vel, label)
+                        # Constant velocity for first few frames after loss
+                        frames_since_loss = self.hands_tracker[label]
+                        if frames_since_loss <= CONSTANT_VELOCITY_FRAMES:
+                            # Keep velocity unchanged (constant velocity)
+                            pass
+                        else:
+                            # Apply friction
+                            if speed < 0.001:
+                                self.ghost_velocity[label] = [0.0]*6
+                                self._log('CORE', f'KINEMATIC HALT FOR {label}', True)
+                                if self.ghost_ttl_counter[label] > 3:
+                                    self.ghost_ttl_counter[label] = 3
+                                    self.hands_tracker[label] = self.MAX_GHOST_TTL - 3
+                            else:
+                                self.ghost_velocity[label][0] *= self.KINEMATIC_FRICTION
+                                self.ghost_velocity[label][1] *= self.KINEMATIC_FRICTION
+                                self.ghost_velocity[label][2] *= self.KINEMATIC_FRICTION
+                                self.ghost_velocity[label][3] *= (self.KINEMATIC_FRICTION * 0.7)
+                                self.ghost_velocity[label][4] *= (self.KINEMATIC_FRICTION * 0.7)
+                                self.ghost_velocity[label][5] *= (self.KINEMATIC_FRICTION * 0.7)
+                                self._log('CORE', f'KINEMATIC DECAY FOR {label}', True)
+
+                        # Invalidate flow points so we don't reuse stale ones
                         self.lk_tracked_points[label] = None
 
+                    # Generate ghost frame using current velocity
+                    vel = self.ghost_velocity[label]
+                    ghost = self.generate_frames(vel, label)
                     if ghost is not None:
                         ghost_pts = self.calculate_hand_points(ghost, label, is_generated=True)
-                    
+
                     self.ghost_ttl_counter[label] -= 1
                 else:
                     self.ghost_velocity[label] = [0.0]*6
@@ -764,19 +885,19 @@ class AR:
                             self._log('CORE', f'GHOST EXPIRED: Wiping spatial memory for {label}', True)
                             self.position_histogram[label].clear()
                             self.lk_tracked_points[label] = None
-                
+
                 if ghost_pts and len(ghost_pts) > 0:
                     ar_data["FRAME_TYPE"][label] = "GHOST"
                     ar_data["POSITION_DATA"][label] = ghost_pts
                 else:
-                    ar_data["FRAME_TYPE"][label] = "REAL" 
+                    ar_data["FRAME_TYPE"][label] = "REAL"
                     ar_data["POSITION_DATA"][label] = []
-                    
+
                 ar_data["SCALE"][label] = 1.0
 
         ar_data["HAND_PRESENCE"] = any(self.presence_counter[label] >= self.presence_threshold_on for label in ("LEFT","RIGHT"))
 
         self.ar_data = ar_data
         self.prev_gray = current_gray
-        
+
         return ar_data

@@ -12,7 +12,7 @@ import numpy as np
 import pygame
 import sys
 import time
-from scripts.ar import AR
+from controller.ar import AR
 from datetime import datetime
 import math
 import argparse
@@ -60,7 +60,7 @@ def safe_get_position_pts_from_ar_data(ar_data, label):
             safe.append(None)
             continue
         try:
-            x = int(round(p[0])); y = int(round(p[1]))
+            x = int(round(p[0] * WIDTH)); y = int(round(p[1] * HEIGHT))
             safe.append((x, y))
         except Exception:
             safe.append(None)
@@ -84,7 +84,7 @@ def draw_points(surf, pts, color, radius=3):
         return
     for p in pts:
         if p:
-            pygame.draw.circle(surf, color, p, radius)
+            pygame.draw.circle(surf, color, (p[0] * WIDTH, p[1]* HEIGHT), radius)
 
 def frame_rgb_to_surface(frame_rgb):
     """Convert HxWx3 RGB numpy array to a pygame Surface."""
