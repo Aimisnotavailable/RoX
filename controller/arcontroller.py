@@ -43,7 +43,7 @@ class ARController:
     def __init__(self, engine):
         self.engine = engine
         self.ar = AR(WIN_RES)
-        self.cap = cv2.VideoCapture(0)
+        self.cap = cv2.VideoCapture('demo\demo.mp4')
         self.running = True
 
         # Gesture manager
@@ -122,9 +122,10 @@ class ARController:
                 continue
             frame = cv2.flip(frame, 1)
             ar_data = self.ar.update(frame)
+            
             if ar_data is None:
                 continue
-
+            
             self._raw_left_landmarks = ar_data["POSITION_DATA"].get("LEFT", [])
             self._raw_right_landmarks = ar_data["POSITION_DATA"].get("RIGHT", [])
             self._hand_type_left = ar_data['FRAME_TYPE'].get("LEFT", "REAL")

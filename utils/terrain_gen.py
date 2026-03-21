@@ -7,7 +7,7 @@ from settings import *
 def get_height(x, z):
     # island mask
     island = 1 / (pow(0.0025 * math.hypot(x - CENTER_XZ, z - CENTER_XZ), 20) + 0.0001)
-    island = 1 # min(island, 1)
+    island = min(island, 1)
 
     # amplitude
     a1 = CENTER_Y
