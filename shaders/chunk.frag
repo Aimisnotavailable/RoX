@@ -30,7 +30,7 @@ void main() {
     if (frag_world_pos.y < water_line) tex_col *= vec3(0.0, 0.3, 1.0);
 
     // fog
-    float fog_dist = 0; // gl_FragCoord.z / gl_FragCoord.w;
+    float fog_dist = gl_FragCoord.z / gl_FragCoord.w;
     tex_col = mix(tex_col, bg_color, (1.0 - exp2(-0.00001 * fog_dist * fog_dist)));
 
     tex_col = pow(tex_col, inv_gamma);
