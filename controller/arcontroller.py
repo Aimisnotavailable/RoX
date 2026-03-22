@@ -15,8 +15,9 @@ from controller.gesture_detector import (
 from scripts.logger import get_logger_info
 
 ## TO-DO
+## FIX THE PDF FILE FOR THE DOCUMENTATION (OKAY BOSS)
 ## FIX THE GESTURE LOCK
-## IMPLEMENT HEAD-COUPLING
+## IMPLEMENT HEAD-COUPLING (WILL PROLLY NOT DO THIS YET)
 ## TAKE GIF VIDS
 
 TOP_MENU = [
