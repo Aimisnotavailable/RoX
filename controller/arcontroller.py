@@ -15,7 +15,7 @@ from controller.gesture_detector import (
 from scripts.logger import get_logger_info
 
 ## TO-DO
-## FIX THE PDF FILE FOR THE DOCUMENTATION (OKAY BOSS)
+## FIX THE PDF FILE FOR THE DOCUMENTATION (OKAY BOSS) -- DONE
 ## FIX THE GESTURE LOCK
 ## IMPLEMENT HEAD-COUPLING (WILL PROLLY NOT DO THIS YET)
 ## TAKE GIF VIDS
@@ -335,13 +335,13 @@ class ARController:
         else:
             self.last_zoom_dist = None
 
-        # Clean up pinch if hand disappeared
-        if not self.smooth_left_landmarks: # and self._hand_type_left == "REAL":
-            self.pinch_active_left = False
-            self.pinch_hold_emitted['LEFT'] = False
-        if not self.smooth_right_landmarks: # and self._hand_type_right == "REAL":
-            self.pinch_active_right = False
-            self.pinch_hold_emitted['RIGHT'] = False
+        # # Clean up pinch if hand disappeared
+        # if not self.smooth_left_landmarks: # and self._hand_type_left == "REAL":
+        #     self.pinch_active_left = False
+        #     self.pinch_hold_emitted['LEFT'] = False
+        # if not self.smooth_right_landmarks: # and self._hand_type_right == "REAL":
+        #     self.pinch_active_right = False
+        #     self.pinch_hold_emitted['RIGHT'] = False
 
         # Update ghost region (position is set by grab UPDATE; rendering handles centering)
         if hasattr(self.engine.scene, 'ghost_region'):
