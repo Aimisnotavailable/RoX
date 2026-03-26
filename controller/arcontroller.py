@@ -44,7 +44,7 @@ class ARController:
     def __init__(self, engine):
         self.engine = engine
         self.ar = AR(WIN_RES)
-        self.cap = cv2.VideoCapture('demo\demo.mp4')
+        self.cap = cv2.VideoCapture(0)
         self.running = True
 
         # Gesture manager

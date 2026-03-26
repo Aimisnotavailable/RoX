@@ -9,6 +9,7 @@ from world_objects.clouds import Clouds
 from utils.hud import HUD
 from world_objects.hand_renderer import HandRenderer
 from world_objects.ghost_region import GhostRegion
+from world_objects.raycast_ray import RayCastRay
 
 class Scene:
     def __init__(self, engine):
@@ -22,6 +23,9 @@ class Scene:
         self.hand_right = HandRenderer(engine, 'RIGHT')
 
         self.ghost_region = GhostRegion(engine)
+
+        # Ray beam
+        self.ray_beam = RayCastRay(engine, hand_label='RIGHT')
         # ---> ADD THIS INITIALIZATION <---
         self.hud = HUD(engine)
 
@@ -34,6 +38,8 @@ class Scene:
         if ar:
             self.hand_left.update(ar.smooth_left_landmarks)
             self.hand_right.update(ar.smooth_right_landmarks)
+        
+        self.ray_beam.update() 
 
 
     def render(self):
@@ -52,6 +58,8 @@ class Scene:
         # voxel selection
         self.voxel_marker.render()
         self.ghost_region.render()
+
+        self.ray_beam.render()
 
         # ---> ADD THIS HUD RENDER PASS <---
         # Disable DEPTH_TEST so the 2D UI doesn't clip into 3D chunks

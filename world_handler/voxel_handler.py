@@ -278,6 +278,7 @@ class VoxelHandler:
                     current_voxel_pos.z += dz
                     max_z += delta_z
                     step_dir = 2
+        self.voxel_world_pos = None
         return False
 
 
