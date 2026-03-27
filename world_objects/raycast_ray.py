@@ -3,6 +3,9 @@ import glm
 import math
 from meshes.cylinder_mesh import CylinderMesh
 
+# Fix visual beam lock
+# Fix raycast method
+# reuse raycast method from voxel handler
 class RayCastRay:
     """Visual beam from index fingertip to the currently targeted block,
        accounting for world rotation and scaling."""
