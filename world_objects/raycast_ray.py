@@ -65,9 +65,17 @@ class RayCastRay:
 
         # Get the targeted block world position from the voxel handler
         vh = self.engine.scene.world.voxel_handler
+
+        if ar.is_grabbing:
+            self.visible = False
+            return
+
         if vh.voxel_world_pos is not None:
+            pos = vh.voxel_world_pos
+            if vh.is_dragging:
+                pos = vh.place_pos
             # Block's local lower corner, convert to center in local coordinates
-            local_center = glm.vec3(vh.voxel_world_pos) + glm.vec3(0.5)
+            local_center = glm.vec3(pos) + glm.vec3(0.5)
             # Apply world transform (rotation + scale) to get global position
             world = self.engine.scene.world
             global_center = world.m_model * glm.vec4(local_center, 1.0)

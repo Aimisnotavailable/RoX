@@ -15,6 +15,7 @@ from controller.gesture_detector import (
 from scripts.logger import get_logger_info
 
 ## TO-DO
+## PRIORITY -- FIX MOVEMENT CONTROLS USING AR
 ## FIX THE PDF FILE FOR THE DOCUMENTATION (OKAY BOSS) -- DONE
 ## FIX THE GESTURE LOCK
 ## IMPLEMENT HEAD-COUPLING (WILL PROLLY NOT DO THIS YET)
@@ -318,22 +319,24 @@ class ARController:
         self.ar_right_click = self.pinch_active_right
 
         # Two‑hand pinch zoom
-        if self.pinch_active_left and self.pinch_active_right and not self.is_grabbing:
-            if self.radial_menu_active:
-                self.close_radial_menu()
-            if self.smooth_left_pos and self.smooth_right_pos:
-                l_pixel = (self.smooth_left_pos.x * WIN_RES[0], self.smooth_left_pos.y * WIN_RES[1])
-                r_pixel = (self.smooth_right_pos.x * WIN_RES[0], self.smooth_right_pos.y * WIN_RES[1])
-                current_dist = math.hypot(l_pixel[0] - r_pixel[0], l_pixel[1] - r_pixel[1])
-                if self.last_zoom_dist is not None:
-                    delta = (current_dist - self.last_zoom_dist) * 0.005
-                    self.engine.scene.world.world_scale += delta
-                    self.engine.scene.world.world_scale = max(0.1, min(10.0, self.engine.scene.world.world_scale))
-                self.last_zoom_dist = current_dist
-            else:
-                self.last_zoom_dist = None
-        else:
-            self.last_zoom_dist = None
+
+        # Deprecate zoom for now cause it is messing with our grab function misplace
+        # if self.pinch_active_left and self.pinch_active_right and not self.is_grabbing:
+        #     if self.radial_menu_active:
+        #         self.close_radial_menu()
+        #     if self.smooth_left_pos and self.smooth_right_pos:
+        #         l_pixel = (self.smooth_left_pos.x * WIN_RES[0], self.smooth_left_pos.y * WIN_RES[1])
+        #         r_pixel = (self.smooth_right_pos.x * WIN_RES[0], self.smooth_right_pos.y * WIN_RES[1])
+        #         current_dist = math.hypot(l_pixel[0] - r_pixel[0], l_pixel[1] - r_pixel[1])
+        #         if self.last_zoom_dist is not None:
+        #             delta = (current_dist - self.last_zoom_dist) * 0.005
+        #             self.engine.scene.world.world_scale += delta
+        #             self.engine.scene.world.world_scale = max(0.1, min(10.0, self.engine.scene.world.world_scale))
+        #         self.last_zoom_dist = current_dist
+        #     else:
+        #         self.last_zoom_dist = None
+        # else:
+        #     self.last_zoom_dist = None
 
         # # Clean up pinch if hand disappeared
         # if not self.smooth_left_landmarks: # and self._hand_type_left == "REAL":
