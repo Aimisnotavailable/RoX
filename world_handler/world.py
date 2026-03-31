@@ -4,6 +4,8 @@ from world_handler.voxel_handler import VoxelHandler
 from world_handler.world_data_handler import save_world, load_chunk_by_index
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Create a world generator where it is not limited to only terrain but more voxel like objects
+# Implement a z curve algorithm to save memory when flattening the entire chunks data
 
 class World:
     def __init__(self, engine, new_world=False):
