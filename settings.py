@@ -122,3 +122,44 @@ BRUSH_MULT_MIN = 2
 BRUSH_MULT_MAX = 3.0
 
 BOTH_HANDS_HOLD_TIME = 1.0       # seconds to hold both pinched to trigger action
+
+
+# RADIAL MENUS
+
+# Menus
+TOP_MENU = [
+    {"name": "BLOCKS", "color": (200,200,200), "submenu": [
+        {"name": "SAND",   "color": (230,210,180), "voxel_id": 1},
+        {"name": "GRASS",  "color": (100,200,100), "voxel_id": 2},
+        {"name": "DIRT",   "color": (140,100,70),  "voxel_id": 3},
+        {"name": "STONE",  "color": (160,160,170), "voxel_id": 4},
+        {"name": "SNOW",   "color": (240,240,255), "voxel_id": 5},
+        {"name": "LEAVES", "color": (80,160,80),   "voxel_id": 6},
+        {"name": "WOOD",   "color": (180,140,100), "voxel_id": 7},
+        {"name": "BACK",   "color": (100,100,100), "action": "back"}
+    ]},
+    {"name": "GRAB SIZE", "color": (200,200,200), "submenu": [
+        {"name": "SIZE 1", "color": (200,200,200), "size": 1},
+        {"name": "SIZE 3", "color": (200,200,200), "size": 3},
+        {"name": "SIZE 5", "color": (200,200,200), "size": 5},
+        {"name": "BACK",   "color": (100,100,100), "action": "back"}
+    ]},
+    {"name": "EXIT", "color": (150,150,150), "action": "exit"},
+]
+
+WORLD_GEN_PARAMS = {
+    "sphere" :  {"radius": 30},
+    "torus" : {"R": 40, "r": 10},
+    "cube"  : {"half_size": 20},
+    "cylinder" : {"radius": 20, "height": 40, "axis": "y"},
+    "sinewave" : {"amplitude": 15, "wavelength": 30}
+
+}
+WORLD_GEN_MENU = [
+    {"name": "SPHERE",   "color": (100,200,200), "type": "sphere",   "params": WORLD_GEN_PARAMS["sphere"]},
+    {"name": "TORUS",    "color": (200,100,200), "type": "torus",    "params": WORLD_GEN_PARAMS["torus"]},
+    {"name": "CUBE",     "color": (200,200,100), "type": "cube",     "params": WORLD_GEN_PARAMS["cube"]},
+    {"name": "CYLINDER", "color": (100,200,100), "type": "cylinder", "params": WORLD_GEN_PARAMS["cylinder"]},
+    {"name": "SINEWAVE", "color": (200,150,100), "type": "sinewave", "params": WORLD_GEN_PARAMS["sinewave"]},
+    {"name": "BACK",     "color": (100,100,100), "action": "back"},
+]

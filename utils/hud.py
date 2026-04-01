@@ -383,6 +383,11 @@ class HUD:
             left_color,
             right_color
         ]
+
+        world = self.engine.scene.world
+        world_type = world.generator_type.capitalize()
+        self.draw_text(f"GEN: {world_type}", (info_rect.x + 20, 135), (180, 180, 220), self.small_font)
+
         for y, text, col in zip(y_offsets, texts, colors):
             self.draw_text(text, (info_rect.x + 20, y), col, self.font, anchor='topleft')
 

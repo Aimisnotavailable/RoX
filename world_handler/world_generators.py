@@ -70,3 +70,59 @@ class FunctionWorldGenerator:
 
         # Flatten and assign
         chunk_voxels[mask.ravel()] = self.voxel_id
+
+# ---- Predefined shape factories (return a FunctionWorldGenerator) ----
+def sphere_generator(center, radius, voxel_id=STONE):
+    cx, cy, cz = center
+    def sphere_func(x, y, z, cx, cy, cz, r):
+        return (x - cx)**2 + (y - cy)**2 + (z - cz)**2 <= r**2
+    return FunctionWorldGenerator(sphere_func, voxel_id,
+                                  cx=cx, cy=cy, cz=cz, r=radius)
+
+def torus_generator(center, R, r, voxel_id=STONE):
+    cx, cy, cz = center
+    def torus_func(x, y, z, cx, cy, cz, R, r):
+        dx = x - cx
+        dy = y - cy
+        dz = z - cz
+        return (np.sqrt(dx*dx + dz*dz) - R)**2 + dy*dy <= r*r
+    return FunctionWorldGenerator(torus_func, voxel_id,
+                                  cx=cx, cy=cy, cz=cz, R=R, r=r)
+
+def cube_generator(center, half_size, voxel_id=STONE):
+    cx, cy, cz = center
+    hs = half_size
+    def cube_func(x, y, z, cx, cy, cz, hs):
+        return (np.abs(x - cx) <= hs) & (np.abs(y - cy) <= hs) & (np.abs(z - cz) <= hs)
+    return FunctionWorldGenerator(cube_func, voxel_id,
+                                  cx=cx, cy=cy, cz=cz, hs=hs)
+
+def cylinder_generator(center, radius, height, voxel_id=STONE, axis='y'):
+    cx, cy, cz = center
+    half_h = height / 2
+    if axis == 'y':
+        def cylinder_func(x, y, z, cx, cy, cz, r, hh):
+            dx = x - cx
+            dz = z - cz
+            return (dx*dx + dz*dz <= r*r) & (np.abs(y - cy) <= hh)
+    elif axis == 'x':
+        def cylinder_func(x, y, z, cx, cy, cz, r, hh):
+            dy = y - cy
+            dz = z - cz
+            return (dy*dy + dz*dz <= r*r) & (np.abs(x - cx) <= hh)
+    elif axis == 'z':
+        def cylinder_func(x, y, z, cx, cy, cz, r, hh):
+            dx = x - cx
+            dy = y - cy
+            return (dx*dx + dy*dy <= r*r) & (np.abs(z - cz) <= hh)
+    else:
+        raise ValueError("axis must be 'x', 'y', or 'z'")
+    return FunctionWorldGenerator(cylinder_func, voxel_id,
+                                  cx=cx, cy=cy, cz=cz, r=radius, hh=half_h)
+
+def sinewave_generator(amplitude=10, wavelength=20, voxel_id=STONE):
+    def sine_func(x, y, z, amp, wl):
+        # y = amp * sin(2π x / wl) – fill below the surface
+        surface = amp * np.sin(2 * np.pi * x / wl)
+        return y <= surface
+    return FunctionWorldGenerator(sine_func, voxel_id, amp=amplitude, wl=wavelength)
