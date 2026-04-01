@@ -438,11 +438,11 @@ class HUD:
             right_status = "GRAB"
             right_color = (255, 180, 80)
 
-        # Draw two circles at bottom corners
+        # Draw circular status at bottom corners (raised to avoid camera feed)
         left_x = 70
-        left_y = self.res[1] - 70
+        left_y = self.res[1] - 85
         right_x = self.res[0] - 70
-        right_y = self.res[1] - 70
+        right_y = self.res[1] - 85
         self.draw_circular_status(left_x, left_y, "LEFT", left_status, left_color)
         self.draw_circular_status(right_x, right_y, "RIGHT", right_status, right_color)
 
@@ -451,7 +451,6 @@ class HUD:
             cam_surf = ar.ar.image
             cam_surf = pg.transform.smoothscale(cam_surf, (260, 146))
             pip_rect = cam_surf.get_rect(bottomleft=(20, self.res[1] - 20))
-            # Frame
             self.draw_glass_panel(pip_rect.inflate(10, 10), color=(0,0,0,100), accent=(80,140,200,200))
             self.surface.blit(cam_surf, pip_rect)
 
@@ -486,19 +485,38 @@ class HUD:
             self.draw_text_centered("BUILD", extra_rect, (100, 255, 100), self.small_font, bg=(10,10,15,200))
             self.draw_text(mode_str, (extra_rect.centerx, extra_rect.bottom - 18), (200, 220, 255), self.small_font, anchor='center')
 
-        # ---- Tracking status (top‑right) ----
-        track_rect = pg.Rect(self.res[0] - 220, 20, 200, 60)
+        # ---- FPS Graph (top‑right) ----
+        # Keep track of FPS values for graph
+        fps = self.engine.clock.get_fps()
+        self.fps_values.append(fps)
+        if len(self.fps_values) > self.fps_max_len:
+            self.fps_values.pop(0)
+        if len(self.fps_values) >= 2:
+            graph_width = 120
+            graph_height = 40
+            graph_rect = pg.Rect(self.res[0] - graph_width - 20, 20, graph_width, graph_height)
+            draw_rounded_rect(self.surface, graph_rect, (10, 12, 18, 200), radius=4)
+            max_fps = max(max(self.fps_values), 30)
+            points = []
+            for i, val in enumerate(self.fps_values):
+                x = graph_rect.x + (i / len(self.fps_values)) * graph_width
+                y = graph_rect.y + graph_height - (val / max_fps) * graph_height
+                points.append((x, y))
+            if len(points) > 1:
+                pg.draw.lines(self.surface, (100, 200, 100), False, points, 2)
+
+        # ---- Tracking status (top‑right, below graph) ----
+        track_rect = pg.Rect(self.res[0] - 220, 100, 200, 60)
         self.draw_glass_panel(track_rect)
         left_track = "REAL" if ar._hand_type_left == "REAL" else "GHOST"
         right_track = "REAL" if ar._hand_type_right == "REAL" else "GHOST"
-        self.draw_text(f"L:{left_track}", (track_rect.x + 20, track_rect.y + 18), (100, 255, 100) if ar._hand_type_left == "REAL" else (180, 180, 180), self.small_font)
-        self.draw_text(f"R:{right_track}", (track_rect.x + 20, track_rect.y + 38), (100, 255, 100) if ar._hand_type_right == "REAL" else (180, 180, 180), self.small_font)
+        self.draw_text(f"L:{left_track}", (track_rect.x + 20, track_rect.y + 18),
+                    (100, 255, 100) if ar._hand_type_left == "REAL" else (180, 180, 180), self.small_font)
+        self.draw_text(f"R:{right_track}", (track_rect.x + 20, track_rect.y + 38),
+                    (100, 255, 100) if ar._hand_type_right == "REAL" else (180, 180, 180), self.small_font)
 
         # ---- Animated message ----
         self._draw_animated_message()
-
-        # ---- FPS Graph ----
-        self.draw_fps_graph()
 
         # ---- Loading overlay ----
         if getattr(self.engine.scene.world, 'world_swapping', False):

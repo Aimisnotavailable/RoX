@@ -57,18 +57,18 @@ class FunctionWorldGenerator:
         base_y = cy * CHUNK_SIZE
         base_z = cz * CHUNK_SIZE
 
-        # Create coordinate grids in (x, y, z) order
         x = np.arange(base_x, base_x + CHUNK_SIZE)[:, None, None]
         y = np.arange(base_y, base_y + CHUNK_SIZE)[None, :, None]
         z = np.arange(base_z, base_z + CHUNK_SIZE)[None, None, :]
 
-        # Evaluate the shape function (returns boolean array of shape (48,48,48))
         mask = self.func(x, y, z, **self.kwargs)
+        
+        # Ensure mask has full 3D shape (in case the function doesn't use all axes)
+        if mask.shape != (CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE):
+            mask = np.broadcast_to(mask, (CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE))
 
-        # Reorder axes to match chunk's internal layout: (y, z, x)
+        # Reorder to match chunk's internal layout: (y, z, x)
         mask = mask.transpose(1, 2, 0)
-
-        # Flatten and assign
         chunk_voxels[mask.ravel()] = self.voxel_id
 
 # ---- Predefined shape factories (return a FunctionWorldGenerator) ----
@@ -126,3 +126,37 @@ def sinewave_generator(amplitude=10, wavelength=20, voxel_id=STONE):
         surface = amp * np.sin(2 * np.pi * x / wl)
         return y <= surface
     return FunctionWorldGenerator(sine_func, voxel_id, amp=amplitude, wl=wavelength)
+
+def wave_generator(amplitude=10, wavelength_x=20, wavelength_z=20, voxel_id=STONE):
+    """3D wave surface: y = A * sin(2πx/λx) * cos(2πz/λz)"""
+    def wave_func(x, y, z, amp, wx, wz):
+        surface = amp * np.sin(2 * np.pi * x / wx) * np.cos(2 * np.pi * z / wz)
+        return y <= surface
+    return FunctionWorldGenerator(wave_func, voxel_id, amp=amplitude, wx=wavelength_x, wz=wavelength_z)
+
+def hill_generator(radius=80, height=40, center=None, voxel_id=STONE):
+    """Conical hill with given radius and height."""
+    if center is None:
+        center = (WORLD_W * CHUNK_SIZE // 2, 0, WORLD_D * CHUNK_SIZE // 2)
+    cx, cy, cz = center
+    def hill_func(x, y, z, cx, cy, cz, r, h):
+        dx = x - cx
+        dz = z - cz
+        dist = np.sqrt(dx*dx + dz*dz)
+        surface = cy + h * (1 - dist / r)
+        # Only fill where dist <= r
+        return (y <= surface) & (dist <= r)
+    return FunctionWorldGenerator(hill_func, voxel_id, cx=cx, cy=cy, cz=cz, r=radius, h=height)
+
+def pyramid_generator(center, half_base, height, voxel_id=STONE):
+    """Square pyramid."""
+    cx, cy, cz = center
+    hh = half_base
+    def pyramid_func(x, y, z, cx, cy, cz, hh, ht):
+        dx = np.abs(x - cx)
+        dz = np.abs(z - cz)
+        # Linear interpolation: at the center (dx=0, dz=0) max height, at edges height=0
+        max_d = max(dx, dz)
+        surface = cy + ht * (1 - max_d / hh) * (max_d <= hh)
+        return y <= surface
+    return FunctionWorldGenerator(pyramid_func, voxel_id, cx=cx, cy=cy, cz=cz, hh=half_base, ht=height)

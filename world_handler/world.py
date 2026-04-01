@@ -14,8 +14,10 @@ from world_handler.world_generators import (
     cube_generator,
     cylinder_generator,
     sinewave_generator,
+    wave_generator,
+    hill_generator,
+    pyramid_generator,
 )
-
 
 class World:
     def __init__(self, engine, new_world=False, generator_type='terrain', build_meshes=True, **gen_kwargs):
@@ -43,7 +45,7 @@ class World:
 
     def _create_generator(self, generator_type, **kwargs):
         # Default center for shape generators if not provided
-        if generator_type in ('sphere', 'torus', 'cube', 'cylinder'):
+        if generator_type in list(WORLD_GEN_PARAMS) and not generator_type in ('sinewave', 'wave'):
             if 'center' not in kwargs:
                 kwargs['center'] = (
                     WORLD_W * CHUNK_SIZE // 2,
@@ -176,6 +178,8 @@ class World:
                     chunk, voxels = future.result()
                     self.chunks[idx] = chunk
                     self.voxels[idx] = voxels
+                    chunk.voxels = self.voxels[idx]
+                    chunk.is_empty = not np.any(voxels)
                 except Exception as e:
                     get_logger_info("ERROR", f"Error generating chunk at {pos}: {e}")
 
