@@ -3,19 +3,46 @@ from world_objects.chunk import Chunk
 from world_handler.voxel_handler import VoxelHandler
 from world_handler.world_data_handler import save_world, load_chunk_by_index
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
+from datetime import datetime
 # Create a world generator where it is not limited to only terrain but more voxel like objects
 # Implement a z curve algorithm to save memory when flattening the entire chunks data
 
+from world_handler.world_generators import TerrainWorldGenerator, FunctionWorldGenerator   # new import
+
 class World:
-    def __init__(self, engine, new_world=False):
+    def __init__(self, engine, new_world=False, generator_type='terrain'):
         self.engine = engine
         self.chunks = [None for _ in range(WORLD_VOL)]
         self.voxels = np.empty([WORLD_VOL, CHUNK_VOL], dtype='uint8')
         self.new_world = new_world
+
+        # --- Create the appropriate generator ---
+        if generator_type == 'terrain':
+            self.generator = TerrainWorldGenerator()
+        elif generator_type == 'sphere':
+            # Example sphere: radius 30, centered in the world
+            center = (WORLD_W * CHUNK_SIZE // 2, WORLD_H * CHUNK_SIZE // 2, WORLD_D * CHUNK_SIZE // 2)
+            radius = 30
+            def sphere_func(x, y, z, center_x, center_y, center_z, radius):
+                dx = x - center_x
+                dy = y - center_y
+                dz = z - center_z
+                return dx*dx + dy*dy + dz*dz <= radius*radius
+
+            self.generator = FunctionWorldGenerator(sphere_func,
+                                    voxel_id=STONE,
+                                    center_x=center[0],
+                                    center_y=center[1],
+                                    center_z=center[2],
+                                    radius=radius)
+        else:
+            raise ValueError(f"Unknown generator type: {generator_type}")
+
         if new_world:
+            print("WORLD BUILDING STARTED")
             self.build_chunks()
             self.build_chunk_mesh()
+            print("WORLD BUILDING DONE")
         self.voxel_handler = VoxelHandler(self)
 
         self.world_yaw = 0.0
@@ -108,7 +135,7 @@ class World:
                         vox = vox[:CHUNK_VOL_local]
 
                 # create chunk and assign backing array
-                chunk = Chunk(self, position=pos)
+                chunk = Chunk(self, position=pos, generator=self.generator)
                 self.chunks[idx] = chunk
                 self.voxels[idx] = vox
                 chunk.voxels = self.voxels[idx]
@@ -157,20 +184,57 @@ class World:
         # self.rebuild_chunk_mesh(pos)
         
     def build_chunks(self):
+        # Do NOT re-allocate; use the already allocated self.chunks and self.voxels
+        # But ensure they are cleared (especially important if you ever call build_chunks again)
+        for i in range(WORLD_VOL):
+            self.chunks[i] = None
+        self.voxels.fill(0)   # reset to zeros
+
+        # Collect all chunk positions and indices
+        positions = []
+        indices = []
+        print("INDICES MARKING STARTED")
         for x in range(WORLD_W):
             for y in range(WORLD_H):
                 for z in range(WORLD_D):
-                    chunk = Chunk(self, position=(x, y, z))
+                    idx = x + WORLD_W * z + WORLD_AREA * y
+                    positions.append((x, y, z))
+                    indices.append(idx)
 
-                    chunk_index = x + WORLD_W * z + WORLD_AREA * y
-                    self.chunks[chunk_index] = chunk
+        print("INDICES MARKING DONE")
+        # Generate chunks in parallel
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {}
+            for pos, idx in zip(positions, indices):
+                future = executor.submit(self._generate_chunk_data, pos, idx)
+                futures[future] = (idx, pos)
 
-                    # put the chunk voxels in a separate array
-                    self.voxels[chunk_index] = chunk.build_voxels()
+            for future in as_completed(futures):
+                idx, pos = futures[future]
+                try:
+                    chunk, voxels = future.result()
+                    self.chunks[idx] = chunk
+                    self.voxels[idx] = voxels
+                except Exception as e:
+                    print(f"Error generating chunk at {pos}: {e}")
 
-                    # get pointer to voxels
-                    chunk.voxels = self.voxels[chunk_index]
-        save_world(CHUNK_FILE_BASE_DIR /  "world.dat", self.voxels)
+        # Build meshes (still sequential)
+        for chunk in self.chunks:
+            if chunk:
+                chunk.build_mesh()
+        
+        print(f"STARTED FILE WRITE {datetime.now()}")
+        # Save the world
+        save_world(CHUNK_FILE_BASE_DIR / "world.dat", self.voxels)
+        print(f"DONE {datetime.now()}")
+
+    def _generate_chunk_data(self, pos, idx):
+        """Generate a single chunk's data (chunk object and voxel array)."""
+        x, y, z = pos
+        chunk = Chunk(self, position=(x, y, z), generator=self.generator)
+        voxels = chunk.build_voxels()
+        chunk.voxels = voxels   # assign the reference
+        return chunk, voxels
 
     def build_chunk_mesh(self):
         for chunk in self.chunks:

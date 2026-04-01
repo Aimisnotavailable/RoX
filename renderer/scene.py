@@ -14,7 +14,7 @@ from world_objects.raycast_ray import RayCastRay
 class Scene:
     def __init__(self, engine):
         self.engine = engine
-        self.world = World(self.engine)
+        self.world = World(self.engine, new_world=True, generator_type='sphere')
         self.voxel_marker = VoxelMarker(self.world.voxel_handler)
         self.water = Water(engine)
         self.clouds = Clouds(engine)
