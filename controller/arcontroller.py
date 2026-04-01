@@ -255,8 +255,8 @@ class ARController:
                         self._open_palm_used_to_close = True
                 elif ev.event_type == 'HOLD' and not self.radial_menu_active and not self._open_palm_used_to_close:
                     if self.smooth_left_pos is not None:
-                        self.radial_menu_type = 'blocks'
-                        self.open_radial_menu(self.smooth_left_pos, TOP_MENU)
+                        self.radial_menu_type = 'main'
+                        self.open_radial_menu(self.smooth_left_pos, MAIN_MENU)
                 elif ev.event_type == 'END':
                     self._open_palm_active = False
                     self._open_palm_used_to_close = False
@@ -269,18 +269,13 @@ class ARController:
                         if self.last_right_point_hit_pos is not None:
                             self.show_block_info(self.last_right_point_hit_pos)
                             self.last_right_point_hit_pos = None
-                    else:
-                        self._open_palm_active = True
-                        if self.radial_menu_active:
-                            self.execute_radial_selection()
-                            self._open_palm_used_to_close = True
-                elif ev.event_type == 'HOLD' and not self.radial_menu_active and not self._open_palm_used_to_close:
-                    if self.smooth_left_pos is not None:
-                        self.radial_menu_type = 'worldgen'
-                        self.open_radial_menu(self.smooth_right_pos, WORLD_GEN_MENU)
-                elif ev.event_type == 'END':
-                    self._open_palm_active = False
-                    self._open_palm_used_to_close = False
+                # elif ev.event_type == 'HOLD' and not self.radial_menu_active and not self._open_palm_used_to_close:
+                #     if self.smooth_left_pos is not None:
+                #         self.radial_menu_type = 'worldgen'
+                #         self.open_radial_menu(self.smooth_right_pos, WORLD_GEN_MENU)
+                # elif ev.event_type == 'END':
+                #     self._open_palm_active = False
+                #     self._open_palm_used_to_close = False
 
             # ----- POINT (LEFT) – menu navigation -----
             elif ev.gesture_name == 'point' and ev.hand == 'LEFT':
@@ -312,20 +307,19 @@ class ARController:
         self.ar_mouse_pos = (self.smooth_right_pos.x * WIN_RES[0], self.smooth_right_pos.y * WIN_RES[1]) if self.smooth_right_pos else None
         self.ar_right_click = self.pinch_active_right
 
-        # Two‑hand pinch zoom (disabled)
-        #     if self.smooth_left_pos and self.smooth_right_pos:
-        #         l_pixel = (self.smooth_left_pos.x * WIN_RES[0], self.smooth_left_pos.y * WIN_RES[1])
-        #         r_pixel = (self.smooth_right_pos.x * WIN_RES[0], self.smooth_right_pos.y * WIN_RES[1])
-        #         current_dist = math.hypot(l_pixel[0] - r_pixel[0], l_pixel[1] - r_pixel[1])
-        #         if self.last_zoom_dist is not None:
-        #             delta = (current_dist - self.last_zoom_dist) * 0.005
-        #             self.engine.scene.world.world_scale += delta
-        #             self.engine.scene.world.world_scale = max(0.1, min(10.0, self.engine.scene.world.world_scale))
-        #         self.last_zoom_dist = current_dist
-        #     else:
-        #         self.last_zoom_dist = None
-        # else:
-        #     self.last_zoom_dist = None
+        # Two‑hand pinch zoom (re-enabled)
+        if self.pinch_active_right and self.pinch_active_left:
+            if self.smooth_left_pos and self.smooth_right_pos:
+                l_pixel = (self.smooth_left_pos.x * WIN_RES[0], self.smooth_left_pos.y * WIN_RES[1])
+                r_pixel = (self.smooth_right_pos.x * WIN_RES[0], self.smooth_right_pos.y * WIN_RES[1])
+                current_dist = math.hypot(l_pixel[0] - r_pixel[0], l_pixel[1] - r_pixel[1])
+                if self.last_zoom_dist is not None:
+                    delta = (current_dist - self.last_zoom_dist) * 0.005
+                    self.engine.scene.world.world_scale += delta
+                    self.engine.scene.world.world_scale = max(0.1, min(10.0, self.engine.scene.world.world_scale))
+                self.last_zoom_dist = current_dist
+            else:
+                self.last_zoom_dist = None
 
         # # Clean up pinch if hand disappeared
         # if not self.smooth_left_landmarks: # and self._hand_type_left == "REAL":
@@ -473,34 +467,35 @@ class ARController:
         if selected < 0:
             self.close_radial_menu()
             return
+
         option = self.engine.scene.hud.radial_menu.current_options[selected]
 
-        if self.radial_menu_type == 'blocks':
-            if "submenu" in option:
-                self.engine.scene.hud.radial_menu.push_submenu(option["submenu"])
-            elif option.get("action") == "back":
-                self.engine.scene.hud.radial_menu.pop_submenu()
-            elif option.get("action") == "exit":
-                self.close_radial_menu()
-            elif "voxel_id" in option:
-                self.engine.scene.world.voxel_handler.new_voxel_id = option["voxel_id"]
-                self.close_radial_menu()
-            elif "size" in option:
-                self.grab_size = option["size"]
-                self.close_radial_menu()
-        elif self.radial_menu_type == 'worldgen':
-            if "submenu" in option:
-                self.engine.scene.hud.radial_menu.push_submenu(option["submenu"])
-            elif option.get("action") == "back":
-                self.engine.scene.hud.radial_menu.pop_submenu()
-            elif "type" in option:
-                gen_type = option["type"]
-                params = option.get("params", {})
-                self.close_radial_menu()
-                # Regenerate the world
-                self.engine.scene.world.regenerate_world(gen_type, **params)
-            else:
-                self.close_radial_menu()
+        # Handle sub‑menus, back, exit
+        if "submenu" in option:
+            self.engine.scene.hud.radial_menu.push_submenu(option["submenu"])
+            return
+        elif option.get("action") == "back":
+            self.engine.scene.hud.radial_menu.pop_submenu()
+            return
+        elif option.get("action") == "exit":
+            self.close_radial_menu()
+            return
+
+        # Specific actions
+        if "voxel_id" in option:
+            self.engine.scene.world.voxel_handler.new_voxel_id = option["voxel_id"]
+            self.close_radial_menu()
+        elif "size" in option:
+            self.grab_size = option["size"]
+            self.close_radial_menu()
+        elif "type" in option:
+            gen_type = option["type"]
+            params = option.get("params", {})
+            self.close_radial_menu()
+            self.engine.scene.world.regenerate_world(gen_type, **params)
+        else:
+            # Unknown option – just close
+            self.close_radial_menu()
 
     # ------------------------------------------------------------------
     # Block info display

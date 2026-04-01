@@ -126,40 +126,54 @@ BOTH_HANDS_HOLD_TIME = 1.0       # seconds to hold both pinched to trigger actio
 
 # RADIAL MENUS
 
-# Menus
-TOP_MENU = [
-    {"name": "BLOCKS", "color": (200,200,200), "submenu": [
-        {"name": "SAND",   "color": (230,210,180), "voxel_id": 1},
-        {"name": "GRASS",  "color": (100,200,100), "voxel_id": 2},
-        {"name": "DIRT",   "color": (140,100,70),  "voxel_id": 3},
-        {"name": "STONE",  "color": (160,160,170), "voxel_id": 4},
-        {"name": "SNOW",   "color": (240,240,255), "voxel_id": 5},
-        {"name": "LEAVES", "color": (80,160,80),   "voxel_id": 6},
-        {"name": "WOOD",   "color": (180,140,100), "voxel_id": 7},
-        {"name": "BACK",   "color": (100,100,100), "action": "back"}
-    ]},
-    {"name": "GRAB SIZE", "color": (200,200,200), "submenu": [
-        {"name": "SIZE 1", "color": (200,200,200), "size": 1},
-        {"name": "SIZE 3", "color": (200,200,200), "size": 3},
-        {"name": "SIZE 5", "color": (200,200,200), "size": 5},
-        {"name": "BACK",   "color": (100,100,100), "action": "back"}
-    ]},
-    {"name": "EXIT", "color": (150,150,150), "action": "exit"},
+# Block selection menu (without grab size)
+BLOCKS_MENU = [
+    {"name": "SAND",   "voxel_id": 1, "color": (230,210,180)},
+    {"name": "GRASS",  "voxel_id": 2, "color": (100,200,100)},
+    {"name": "DIRT",   "voxel_id": 3, "color": (140,100,70)},
+    {"name": "STONE",  "voxel_id": 4, "color": (160,160,170)},
+    {"name": "SNOW",   "voxel_id": 5, "color": (240,240,255)},
+    {"name": "LEAVES", "voxel_id": 6, "color": (80,160,80)},
+    {"name": "WOOD",   "voxel_id": 7, "color": (180,140,100)},
+    {"name": "BACK",   "action": "back", "color": (100,100,100)}
 ]
 
-WORLD_GEN_PARAMS = {
-    "sphere" :  {"radius": 30},
-    "torus" : {"R": 40, "r": 10},
-    "cube"  : {"half_size": 20},
-    "cylinder" : {"radius": 20, "height": 40, "axis": "y"},
-    "sinewave" : {"amplitude": 15, "wavelength": 30}
+# Grab size submenu
+GRAB_SIZE_MENU = [
+    {"name": "SIZE 1", "size": 1, "color": (200,200,200)},
+    {"name": "SIZE 3", "size": 3, "color": (200,200,200)},
+    {"name": "SIZE 5", "size": 5, "color": (200,200,200)},
+    {"name": "BACK",   "action": "back", "color": (100,100,100)}
+]
 
+
+WORLD_GEN_PARAMS = {
+    "sphere":   {"radius": 80},
+    "torus":    {"R": 80, "r": 20},
+    "cube":     {"half_size": 80},
+    "cylinder": {"radius": 40, "height": 80, "axis": "y"},
+    "sinewave": {"amplitude": 15, "wavelength": 30},
+    "wave":     {"amplitude": 12, "wavelength_x": 30, "wavelength_z": 30},
+    "hill":     {"radius": 80, "height": 50},
+    "pyramid":  {"half_base": 60, "height": 80}
 }
+
 WORLD_GEN_MENU = [
     {"name": "SPHERE",   "color": (100,200,200), "type": "sphere",   "params": WORLD_GEN_PARAMS["sphere"]},
     {"name": "TORUS",    "color": (200,100,200), "type": "torus",    "params": WORLD_GEN_PARAMS["torus"]},
     {"name": "CUBE",     "color": (200,200,100), "type": "cube",     "params": WORLD_GEN_PARAMS["cube"]},
     {"name": "CYLINDER", "color": (100,200,100), "type": "cylinder", "params": WORLD_GEN_PARAMS["cylinder"]},
     {"name": "SINEWAVE", "color": (200,150,100), "type": "sinewave", "params": WORLD_GEN_PARAMS["sinewave"]},
+    {"name": "WAVE",     "color": (150,200,150), "type": "wave",     "params": WORLD_GEN_PARAMS["wave"]},
+    {"name": "HILL",     "color": (180,140,100), "type": "hill",     "params": WORLD_GEN_PARAMS["hill"]},
+    {"name": "PYRAMID",  "color": (200,180,120), "type": "pyramid",  "params": WORLD_GEN_PARAMS["pyramid"]},
     {"name": "BACK",     "color": (100,100,100), "action": "back"},
+]
+
+# Top‑level main menu
+MAIN_MENU = [
+    {"name": "BLOCKS",   "submenu": BLOCKS_MENU,    "color": (200,200,200)},
+    {"name": "GRAB SIZE","submenu": GRAB_SIZE_MENU, "color": (200,200,200)},
+    {"name": "WORLD",    "submenu": WORLD_GEN_MENU, "color": (200,200,200)},
+    {"name": "EXIT",     "action": "exit",          "color": (150,150,150)}
 ]

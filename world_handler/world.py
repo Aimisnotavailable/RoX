@@ -4,6 +4,7 @@ from world_handler.voxel_handler import VoxelHandler
 from world_handler.world_data_handler import save_chunk, load_chunk
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+import threading
 
 from world_handler.world_generators import (
     TerrainWorldGenerator,
@@ -15,8 +16,9 @@ from world_handler.world_generators import (
     sinewave_generator,
 )
 
+
 class World:
-    def __init__(self, engine, new_world=False, generator_type='terrain', **gen_kwargs):
+    def __init__(self, engine, new_world=False, generator_type='terrain', build_meshes=True, **gen_kwargs):
         self.engine = engine
         self.chunks = [None for _ in range(WORLD_VOL)]
         self.voxels = np.empty([WORLD_VOL, CHUNK_VOL], dtype='uint8')
@@ -28,14 +30,16 @@ class World:
 
         if new_world:
             get_logger_info("DEBUG", f"WORLD BUILDING STARTED")
-            self.build_chunks()
-            self.build_chunk_mesh()
+            self.build_chunks(build_meshes=build_meshes)
+            if build_meshes:
+                self.build_chunk_mesh()
             get_logger_info("DEBUG", f"WORLD BUILDING DONE")
         self.voxel_handler = VoxelHandler(self)
 
         self.world_yaw = 0.0
         self.world_pitch = 0.0
         self.world_scale = 1.0
+        self.world_swapping = False
 
     def _create_generator(self, generator_type, **kwargs):
         # Default center for shape generators if not provided
@@ -51,20 +55,21 @@ class World:
         if generator_type == 'terrain':
             return TerrainWorldGenerator()
         elif generator_type == 'sphere':
-            # radius must be present in kwargs
             return sphere_generator(**kwargs)
         elif generator_type == 'torus':
-            # requires R and r
             return torus_generator(**kwargs)
         elif generator_type == 'cube':
-            # requires half_size
             return cube_generator(**kwargs)
         elif generator_type == 'cylinder':
-            # requires radius, height, optional axis
             return cylinder_generator(**kwargs)
         elif generator_type == 'sinewave':
-            # optional amplitude, wavelength
             return sinewave_generator(**kwargs)
+        elif generator_type == 'wave':
+            return wave_generator(**kwargs)
+        elif generator_type == 'hill':
+            return hill_generator(**kwargs)
+        elif generator_type == 'pyramid':
+            return pyramid_generator(**kwargs)
         else:
             raise ValueError(f"Unknown generator type: {generator_type}")
 
@@ -141,7 +146,7 @@ class World:
 
         self.rebuild_chunk_mesh(mesh_to_build)
 
-    def build_chunks(self):
+    def build_chunks(self, build_meshes=True):
         # Reset arrays
         for i in range(WORLD_VOL):
             self.chunks[i] = None
@@ -174,10 +179,11 @@ class World:
                 except Exception as e:
                     get_logger_info("ERROR", f"Error generating chunk at {pos}: {e}")
 
-        # Build meshes after all chunks are generated
-        for chunk in self.chunks:
-            if chunk:
-                chunk.build_mesh()
+        if build_meshes:
+            # Build meshes after all chunks are generated
+            for chunk in self.chunks:
+                if chunk:
+                    chunk.build_mesh()
 
         # No monolithic save – each chunk was saved already
 
@@ -194,22 +200,26 @@ class World:
         return chunk, voxels
 
     def regenerate_world(self, generator_type, **kwargs):
-        """Replace the entire world with a new generator."""
         get_logger_info("GAME", f"Regenerating world as {generator_type} with {kwargs}")
-        self.generator_type = generator_type
-        self.generator_params = kwargs
-        self.generator = self._create_generator(generator_type, **kwargs)
 
-        # Clear existing chunk data
-        for i in range(WORLD_VOL):
-            self.chunks[i] = None
-        self.voxels.fill(0)
+        self.engine.scene.hud.show_temp_message(f"Regenerating world as {generator_type}...", duration=10.0)
+        self.world_swapping = True   # flag for loading overlay
 
-        # Rebuild from scratch
-        self.build_chunks()
-        # After build_chunks, the world is ready.
-        if hasattr(self.engine.scene, 'hud'):
-            self.engine.scene.hud.show_temp_message(f"World: {generator_type}", duration=2.0)
+        def _generate_data():
+            try:
+                # Create new world with build_meshes=False
+                new_world = World(self.engine, new_world=True,
+                                  generator_type=generator_type,
+                                  build_meshes=False,   # don't create meshes
+                                  **kwargs)
+                # Store the new world in the engine's pending queue
+                get_logger_info("GAME", f"neworld done")
+                self.engine.scene._pending_world = new_world
+            except Exception as e:
+                get_logger_info("ERROR", f"World generation failed: {e}")
+                self.world_swapping = False
+
+        threading.Thread(target=_generate_data, daemon=True).start()
 
     def build_chunk_mesh(self):
         for chunk in self.chunks:

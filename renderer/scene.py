@@ -14,7 +14,9 @@ from world_objects.raycast_ray import RayCastRay
 class Scene:
     def __init__(self, engine):
         self.engine = engine
-        self.world = World(self.engine, new_world=True, generator_type='sphere')
+        self.world = World(self.engine, new_world=True, generator_type='sphere', build_meshes=True)
+        self._pending_world = None
+
         self.voxel_marker = VoxelMarker(self.world.voxel_handler)
         self.water = Water(engine)
         self.clouds = Clouds(engine)
@@ -30,6 +32,14 @@ class Scene:
         self.hud = HUD(engine)
 
     def update(self):
+        if self._pending_world is not None:
+            new_world = self._pending_world
+            self.world = new_world
+            self.voxel_marker.handler = new_world.voxel_handler
+            self._pending_world = None
+            # Build meshes for the new world (in main thread)
+            new_world.build_chunk_mesh()
+
         self.world.update()
         self.voxel_marker.update()
         self.clouds.update()
