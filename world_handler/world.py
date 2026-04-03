@@ -19,6 +19,7 @@ from world_handler.world_generators import (
     pyramid_generator,
 )
 
+
 class World:
     def __init__(self, engine, new_world=False, generator_type='terrain', build_meshes=True, **gen_kwargs):
         self.engine = engine
@@ -30,12 +31,17 @@ class World:
         self.generator_params = gen_kwargs
         self.generator = self._create_generator(generator_type, **gen_kwargs)
 
+        # Background saver for chunks (non‑blocking I/O)
+        self.save_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="chunk_saver")
+
         if new_world:
+            get_logger_info("DEBUG", f"Time : {datetime.now()}")
             get_logger_info("DEBUG", f"WORLD BUILDING STARTED")
             self.build_chunks(build_meshes=build_meshes)
             if build_meshes:
                 self.build_chunk_mesh()
             get_logger_info("DEBUG", f"WORLD BUILDING DONE")
+            get_logger_info("DEBUG", f"Time : {datetime.now()}")
         self.voxel_handler = VoxelHandler(self)
 
         self.world_yaw = 0.0
@@ -154,16 +160,33 @@ class World:
             self.chunks[i] = None
         self.voxels.fill(0)
 
+        # Bounding box pruning
+        bbox = self.generator.get_bounding_box() if hasattr(self.generator, 'get_bounding_box') else None
         positions = []
         indices = []
-        get_logger_info("DEBUG", f"INDICES MARKING STARTED")
-        for x in range(WORLD_W):
-            for y in range(WORLD_H):
-                for z in range(WORLD_D):
-                    idx = x + WORLD_W * z + WORLD_AREA * y
-                    positions.append((x, y, z))
-                    indices.append(idx)
-        get_logger_info("DEBUG", f"INDICES MARKING DONE")
+
+        if bbox is not None:
+            min_cx = max(0, bbox[0] // CHUNK_SIZE)
+            max_cx = min(WORLD_W - 1, bbox[1] // CHUNK_SIZE)
+            min_cy = max(0, bbox[2] // CHUNK_SIZE)
+            max_cy = min(WORLD_H - 1, bbox[3] // CHUNK_SIZE)
+            min_cz = max(0, bbox[4] // CHUNK_SIZE)
+            max_cz = min(WORLD_D - 1, bbox[5] // CHUNK_SIZE)
+            get_logger_info("DEBUG", f"Bounding box pruning: chunk range x[{min_cx},{max_cx}] y[{min_cy},{max_cy}] z[{min_cz},{max_cz}]")
+            for cx in range(min_cx, max_cx + 1):
+                for cy in range(min_cy, max_cy + 1):
+                    for cz in range(min_cz, max_cz + 1):
+                        idx = cx + WORLD_W * cz + WORLD_AREA * cy
+                        positions.append((cx, cy, cz))
+                        indices.append(idx)
+        else:
+            get_logger_info("DEBUG", "Full world generation (no bounding box)")
+            for x in range(WORLD_W):
+                for y in range(WORLD_H):
+                    for z in range(WORLD_D):
+                        idx = x + WORLD_W * z + WORLD_AREA * y
+                        positions.append((x, y, z))
+                        indices.append(idx)
 
         # Generate chunks in parallel and save each immediately
         with ThreadPoolExecutor(max_workers=8) as executor:
@@ -184,40 +207,45 @@ class World:
                     get_logger_info("ERROR", f"Error generating chunk at {pos}: {e}")
 
         if build_meshes:
-            # Build meshes after all chunks are generated
             for chunk in self.chunks:
                 if chunk:
                     chunk.build_mesh()
 
-        # No monolithic save – each chunk was saved already
-
     def _generate_chunk_data(self, pos, idx):
-        x, y, z = pos
-        chunk = Chunk(self, position=(x, y, z), generator=self.generator)
+        """Generate voxels and schedule background save (non‑blocking)."""
+        chunk = Chunk(self, position=pos, generator=self.generator)
         voxels = chunk.build_voxels()
         chunk.voxels = voxels
 
-        # Save this chunk to disk
+        if np.any(voxels):
+            # Save in background – do not wait
+            self.save_executor.submit(self._save_chunk, idx, voxels)
+            return chunk, voxels
+        else:
+            # Empty chunk – nothing to save
+            return None, voxels
+
+    def _save_chunk(self, idx, voxels):
+        """Background saving task."""
         chunk_path = CHUNK_FILE_BASE_DIR / f"chunk_{idx}.npz"
         save_chunk(chunk_path, voxels)
-
-        return chunk, voxels
 
     def regenerate_world(self, generator_type, **kwargs):
         get_logger_info("GAME", f"Regenerating world as {generator_type} with {kwargs}")
 
         self.engine.scene.hud.show_temp_message(f"Regenerating world as {generator_type}...", duration=10.0)
-        self.world_swapping = True   # flag for loading overlay
+        self.world_swapping = True
 
         def _generate_data():
             try:
+                # Shutdown the old world's saver to avoid race conditions
+                self.save_executor.shutdown(wait=True)
                 # Create new world with build_meshes=False
                 new_world = World(self.engine, new_world=True,
                                   generator_type=generator_type,
-                                  build_meshes=False,   # don't create meshes
+                                  build_meshes=False,
                                   **kwargs)
-                # Store the new world in the engine's pending queue
-                get_logger_info("GAME", f"neworld done")
+                get_logger_info("GAME", "new world generation done")
                 self.engine.scene._pending_world = new_world
             except Exception as e:
                 get_logger_info("ERROR", f"World generation failed: {e}")
@@ -239,3 +267,7 @@ class World:
         for chunk in self.chunks:
             if chunk:
                 chunk.render()
+
+    def shutdown(self):
+        """Call this when destroying the world to flush pending saves."""
+        self.save_executor.shutdown(wait=True)
