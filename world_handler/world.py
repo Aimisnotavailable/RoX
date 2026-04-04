@@ -17,6 +17,12 @@ from world_handler.world_generators import (
     wave_generator,
     hill_generator,
     pyramid_generator,
+    goursat_generator,
+    steinmetz_generator,
+    heart_generator,
+    spiked_sphere_generator,
+    rounded_octahedron_generator,
+    mobius_generator,
 )
 
 
@@ -78,6 +84,18 @@ class World:
             return hill_generator(**kwargs)
         elif generator_type == 'pyramid':
             return pyramid_generator(**kwargs)
+        elif generator_type == 'goursat':
+            return goursat_generator(**kwargs)
+        elif generator_type == 'steinmetz':
+            return steinmetz_generator(**kwargs)
+        elif generator_type == 'heart':
+            return heart_generator(**kwargs)
+        elif generator_type == 'spiked_sphere':
+            return spiked_sphere_generator(**kwargs)
+        elif generator_type == 'rounded_octahedron':
+            return rounded_octahedron_generator(**kwargs)
+        elif generator_type == 'mobius':
+            return mobius_generator(**kwargs)
         else:
             raise ValueError(f"Unknown generator type: {generator_type}")
 
@@ -166,12 +184,12 @@ class World:
         indices = []
 
         if bbox is not None:
-            min_cx = max(0, bbox[0] // CHUNK_SIZE)
-            max_cx = min(WORLD_W - 1, bbox[1] // CHUNK_SIZE)
-            min_cy = max(0, bbox[2] // CHUNK_SIZE)
-            max_cy = min(WORLD_H - 1, bbox[3] // CHUNK_SIZE)
-            min_cz = max(0, bbox[4] // CHUNK_SIZE)
-            max_cz = min(WORLD_D - 1, bbox[5] // CHUNK_SIZE)
+            min_cx = int(max(0, bbox[0] // CHUNK_SIZE))
+            max_cx = int(min(WORLD_W - 1, bbox[1] // CHUNK_SIZE))
+            min_cy = int(max(0, bbox[2] // CHUNK_SIZE))
+            max_cy = int(min(WORLD_H - 1, bbox[3] // CHUNK_SIZE))
+            min_cz = int(max(0, bbox[4] // CHUNK_SIZE))
+            max_cz = int(min(WORLD_D - 1, bbox[5] // CHUNK_SIZE))
             get_logger_info("DEBUG", f"Bounding box pruning: chunk range x[{min_cx},{max_cx}] y[{min_cy},{max_cy}] z[{min_cz},{max_cz}]")
             for cx in range(min_cx, max_cx + 1):
                 for cy in range(min_cy, max_cy + 1):
@@ -199,6 +217,8 @@ class World:
                 idx, pos = futures[future]
                 try:
                     chunk, voxels = future.result()
+                    if not chunk:
+                        continue
                     self.chunks[idx] = chunk
                     self.voxels[idx] = voxels
                     chunk.voxels = self.voxels[idx]
@@ -219,7 +239,8 @@ class World:
 
         if np.any(voxels):
             # Save in background – do not wait
-            self.save_executor.submit(self._save_chunk, idx, voxels)
+            self._save_chunk(idx, voxels)
+            #self.save_executor.submit(self._save_chunk, idx, voxels)
             return chunk, voxels
         else:
             # Empty chunk – nothing to save

@@ -16,6 +16,8 @@ class Player:
         self.mode = "FPS"
         self.active_camera = self.fps_camera
 
+        self.gen = 0
+
 # --- MATRICES ---
     @property
     def m_view(self):
@@ -90,8 +92,13 @@ class Player:
 
     def handle_event(self, event):
         # Toggle camera mode
-        if event.type == pg.KEYDOWN and event.key == pg.K_TAB:
-            self.switch_camera_mode()
+        if event.type == pg.KEYDOWN:
+            if event.key == pg.K_TAB:
+                self.switch_camera_mode()
+            elif event.key == pygame.K_r:
+                self.gen = (self.gen + 1) % len(WORLD_GEN_PARAMS)
+                gtype = list(WORLD_GEN_PARAMS)[self.gen]
+                self.engine.scene.world.regenerate_world(gtype, **WORLD_GEN_PARAMS[gtype])
 
         # Voxel handling (Clicks)
         if event.type == pg.MOUSEBUTTONDOWN:
@@ -100,6 +107,7 @@ class Player:
                 voxel_handler.set_voxel()
             if event.button == 3:
                 voxel_handler.switch_mode()
+        
 
     def switch_camera_mode(self):
         if self.mode == "FPS":

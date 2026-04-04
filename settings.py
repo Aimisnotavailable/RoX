@@ -151,22 +151,28 @@ WORLD_GEN_PARAMS = {
     "sphere":   {"radius": 80},
     "torus":    {"R": 80, "r": 20},
     "cube":     {"half_size": 80},
-    "cylinder": {"radius": 40, "height": 80, "axis": "y"},
-    "sinewave": {"amplitude": 15, "wavelength": 30},
-    "wave":     {"amplitude": 12, "wavelength_x": 30, "wavelength_z": 30},
-    "hill":     {"radius": 80, "height": 50},
-    "pyramid":  {"half_base": 60, "height": 80}
+    # "cylinder": {"radius": 40, "height": 80, "axis": "y"},
+    # "sinewave": {"amplitude": 15, "wavelength": 30},
+    # "wave":     {"amplitude": 12, "wavelength_x": 30, "wavelength_z": 30},
+    # "hill":     {"radius": 80, "height": 50},
+    # "pyramid":  {"half_base": 60, "height": 80},
+    "goursat":  {"scale": 30},
+    "steinmetz":{"radius": 80},
+    "heart":    {"scale": 40},
+    "spiked_sphere": {"radius": 80, "spikes": 8, "amplitude": 0.3},
+    "rounded_octahedron": {"size": 80, "exponent": 4},
+    "mobius":   {"R": 40, "width": 20, "thickness": 3}
 }
 
 WORLD_GEN_MENU = [
     {"name": "SPHERE",   "color": (100,200,200), "type": "sphere",   "params": WORLD_GEN_PARAMS["sphere"]},
     {"name": "TORUS",    "color": (200,100,200), "type": "torus",    "params": WORLD_GEN_PARAMS["torus"]},
     {"name": "CUBE",     "color": (200,200,100), "type": "cube",     "params": WORLD_GEN_PARAMS["cube"]},
-    {"name": "CYLINDER", "color": (100,200,100), "type": "cylinder", "params": WORLD_GEN_PARAMS["cylinder"]},
-    {"name": "SINEWAVE", "color": (200,150,100), "type": "sinewave", "params": WORLD_GEN_PARAMS["sinewave"]},
-    {"name": "WAVE",     "color": (150,200,150), "type": "wave",     "params": WORLD_GEN_PARAMS["wave"]},
-    {"name": "HILL",     "color": (180,140,100), "type": "hill",     "params": WORLD_GEN_PARAMS["hill"]},
-    {"name": "PYRAMID",  "color": (200,180,120), "type": "pyramid",  "params": WORLD_GEN_PARAMS["pyramid"]},
+    # {"name": "CYLINDER", "color": (100,200,100), "type": "cylinder", "params": WORLD_GEN_PARAMS["cylinder"]},
+    # {"name": "SINEWAVE", "color": (200,150,100), "type": "sinewave", "params": WORLD_GEN_PARAMS["sinewave"]},
+    # {"name": "WAVE",     "color": (150,200,150), "type": "wave",     "params": WORLD_GEN_PARAMS["wave"]},
+    # {"name": "HILL",     "color": (180,140,100), "type": "hill",     "params": WORLD_GEN_PARAMS["hill"]},
+    # {"name": "PYRAMID",  "color": (200,180,120), "type": "pyramid",  "params": WORLD_GEN_PARAMS["pyramid"]},
     {"name": "BACK",     "color": (100,100,100), "action": "back"},
 ]
 
