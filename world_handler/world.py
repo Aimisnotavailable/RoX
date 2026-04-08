@@ -287,7 +287,7 @@ class World:
     def render(self):
         for chunk in self.chunks:
             if chunk:
-                
+                chunk.position = glm.vec3((chunk.position[0] + 0.001) % chunk.base_pos[0] * 2, chunk.position[1], chunk.position[2])
                 chunk.render()
 
     def shutdown(self):
