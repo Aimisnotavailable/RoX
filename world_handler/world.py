@@ -183,4 +183,5 @@ class World:
     def render(self):
         for chunk in self.chunks:
             if chunk:
+                
                 chunk.render()

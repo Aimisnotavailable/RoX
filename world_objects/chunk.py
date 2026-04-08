@@ -9,6 +9,7 @@ class Chunk:
         self.engine = world.engine
         self.world = world
         self.position = position
+        self.base_pos = position
         self.m_model = self.get_model_matrix()
         self.voxels: np.array = None
         self.mesh: ChunkMesh = None
