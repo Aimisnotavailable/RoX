@@ -99,7 +99,9 @@ class Player:
                 self.gen = (self.gen + 1) % len(WORLD_GEN_PARAMS)
                 gtype = list(WORLD_GEN_PARAMS)[self.gen]
                 self.engine.scene.world.regenerate_world(gtype, **WORLD_GEN_PARAMS[gtype])
-
+            elif event.key == pygame.K_g:
+                self.engine.scene.world.position[0] += 1
+                
         # Voxel handling (Clicks)
         if event.type == pg.MOUSEBUTTONDOWN:
             voxel_handler = self.engine.scene.world.voxel_handler

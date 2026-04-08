@@ -203,7 +203,7 @@ class World:
                 for y in range(WORLD_H):
                     for z in range(WORLD_D):
                         idx = x + WORLD_W * z + WORLD_AREA * y
-                        positions.append(glm.vec3(x, y, z))
+                        positions.append((x, y, z))
                         indices.append(idx)
 
         # Generate chunks in parallel and save each immediately
@@ -287,7 +287,7 @@ class World:
     def render(self):
         for chunk in self.chunks:
             if chunk:
-                chunk.world_position = chunk.position + self.position
+                # chunk.position = glm.vec3(0 if (chunk.position[0] < chunk.base_pos[0] * 2) else (chunk.position[0] + 0.01), chunk.position[1], chunk.position[2])
                 chunk.render()
 
     def shutdown(self):

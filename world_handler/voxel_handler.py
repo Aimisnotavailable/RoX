@@ -228,7 +228,7 @@ class VoxelHandler:
         local_origin = glm.vec3(inv_model * glm.vec4(origin, 1.0))
         local_dir = glm.normalize(glm.vec3(inv_model * glm.vec4(direction, 0.0)))
 
-        max_dist = 60.0 if is_rts else 12.0
+        max_dist = 60.0 if is_rts else 60.0
         x1, y1, z1 = local_origin
         x2, y2, z2 = local_origin + local_dir * max_dist
 
@@ -351,7 +351,7 @@ class VoxelHandler:
             self.chunks[index].mesh.rebuild()
 
     def get_voxel_id(self, voxel_world_pos):
-        wx, wy, wz = int(math.floor(voxel_world_pos[0])), int(math.floor(voxel_world_pos[1])), int(math.floor(voxel_world_pos[2]))
+        wx, wy, wz = int(math.floor(voxel_world_pos[0] + self.world.position[0])), int(math.floor(voxel_world_pos[1] + self.world.position[1])), int(math.floor(voxel_world_pos[2] + self.world.position[2]))
         cx, cy, cz = wx // CHUNK_SIZE, wy // CHUNK_SIZE, wz // CHUNK_SIZE
 
         if 0 <= cx < WORLD_W and 0 <= cy < WORLD_H and 0 <= cz < WORLD_D:

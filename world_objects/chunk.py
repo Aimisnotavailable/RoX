@@ -9,7 +9,7 @@ class Chunk:
         self.engine = world.engine
         self.world = world
         self.position = position
-        self.base_pos = position
+        self.world_position = position + self.world.position
         self.m_model = self.get_model_matrix()
         self.voxels: np.array = None
         self.mesh: ChunkMesh = None
@@ -25,12 +25,13 @@ class Chunk:
 
     def set_uniform(self):
         # Calculate local chunk position
-        local_model = glm.translate(glm.mat4(), glm.vec3(self.position) * CHUNK_SIZE)
+        local_model = glm.translate(glm.mat4(), glm.vec3(self.world_position) * CHUNK_SIZE)
         # Multiply by the spinning world matrix
         final_model = self.world.m_model * local_model
         
         self.mesh.program['m_model'].write(final_model)
-
+        self.center = (glm.vec3(self.world_position) + 0.5) * CHUNK_SIZE
+        
     def build_mesh(self):
         self.mesh = ChunkMesh(self)
 
