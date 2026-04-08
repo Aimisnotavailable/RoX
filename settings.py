@@ -36,7 +36,7 @@ CHUNK_VOL = CHUNK_AREA * CHUNK_SIZE
 CHUNK_SPHERE_RADIUS = H_CHUNK_SIZE * math.sqrt(3)
 
 # world
-WORLD_W, WORLD_H = 48, 3
+WORLD_W, WORLD_H = 15, 15
 WORLD_D = WORLD_W
 WORLD_AREA = WORLD_W * WORLD_D
 WORLD_VOL = WORLD_AREA * WORLD_H
@@ -122,3 +122,70 @@ BRUSH_MULT_MIN = 2
 BRUSH_MULT_MAX = 3.0
 
 BOTH_HANDS_HOLD_TIME = 1.0       # seconds to hold both pinched to trigger action
+
+
+# RADIAL MENUS
+
+# Block selection menu (without grab size)
+BLOCKS_MENU = [
+    {"name": "SAND",   "voxel_id": 1, "color": (230,210,180)},
+    {"name": "GRASS",  "voxel_id": 2, "color": (100,200,100)},
+    {"name": "DIRT",   "voxel_id": 3, "color": (140,100,70)},
+    {"name": "STONE",  "voxel_id": 4, "color": (160,160,170)},
+    {"name": "SNOW",   "voxel_id": 5, "color": (240,240,255)},
+    {"name": "LEAVES", "voxel_id": 6, "color": (80,160,80)},
+    {"name": "WOOD",   "voxel_id": 7, "color": (180,140,100)},
+    {"name": "BACK",   "action": "back", "color": (100,100,100)}
+]
+
+# Grab size submenu
+GRAB_SIZE_MENU = [
+    {"name": "SIZE 1", "size": 1, "color": (200,200,200)},
+    {"name": "SIZE 3", "size": 3, "color": (200,200,200)},
+    {"name": "SIZE 5", "size": 5, "color": (200,200,200)},
+    {"name": "BACK",   "action": "back", "color": (100,100,100)}
+]
+
+
+WORLD_GEN_PARAMS = {
+    "sphere":   {"radius": 80},
+    "torus":    {"R": 80, "r": 20},
+    "cube":     {"half_size": 80},
+    # "cylinder": {"radius": 40, "height": 80, "axis": "y"},
+    # "sinewave": {"amplitude": 15, "wavelength": 30},
+    # "wave":     {"amplitude": 12, "wavelength_x": 30, "wavelength_z": 30},
+    # "hill":     {"radius": 80, "height": 50},
+    # "pyramid":  {"half_base": 60, "height": 80},
+    "goursat":  {"scale": 30},
+    "steinmetz":{"radius": 80},
+    "heart":    {"scale": 40},
+    "spiked_sphere": {"radius": 80, "spikes": 8, "amplitude": 0.3},
+    "rounded_octahedron": {"size": 80, "exponent": 4},
+    "mobius":   {"R": 40, "width": 20, "thickness": 3}
+}
+
+WORLD_GEN_MENU = [
+    {"name": "SPHERE",   "color": (100,200,200), "type": "sphere",   "params": WORLD_GEN_PARAMS["sphere"]},
+    {"name": "TORUS",    "color": (200,100,200), "type": "torus",    "params": WORLD_GEN_PARAMS["torus"]},
+    {"name": "CUBE",     "color": (200,200,100), "type": "cube",     "params": WORLD_GEN_PARAMS["cube"]},
+    {"name": "GOURSAT",  "color": (100,150,250), "type": "goursat",  "params": WORLD_GEN_PARAMS["goursat"]},
+    {"name": "STEINMETZ","color": (250,150,100), "type": "steinmetz","params": WORLD_GEN_PARAMS["steinmetz"]},
+    {"name": "HEART",    "color": (255,100,150), "type": "heart",    "params": WORLD_GEN_PARAMS["heart"]},
+    {"name": "SPIKED_SPHERE",   "color": (150,255,100), "type": "spiked_sphere",   "params": WORLD_GEN_PARAMS["spiked_sphere"]},
+    {"name": "ROUNDED_OCTAHEDRON","color": (200,100,255), "type": "rounded_octahedron","params": WORLD_GEN_PARAMS["rounded_octahedron"]},
+    {"name": "MOBIUS",   "color": (100,255,200), "type": "mobius",   "params": WORLD_GEN_PARAMS["mobius"]},
+    # {"name": "CYLINDER", "color": (100,200,100), "type": "cylinder", "params": WORLD_GEN_PARAMS["cylinder"]},
+    # {"name": "SINEWAVE", "color": (200,150,100), "type": "sinewave", "params": WORLD_GEN_PARAMS["sinewave"]},
+    # {"name": "WAVE",     "color": (150,200,150), "type": "wave",     "params": WORLD_GEN_PARAMS["wave"]},
+    # {"name": "HILL",     "color": (180,140,100), "type": "hill",     "params": WORLD_GEN_PARAMS["hill"]},
+    # {"name": "PYRAMID",  "color": (200,180,120), "type": "pyramid",  "params": WORLD_GEN_PARAMS["pyramid"]},
+    {"name": "BACK",     "color": (100,100,100), "action": "back"},
+]
+
+# Top‑level main menu
+MAIN_MENU = [
+    {"name": "BLOCKS",   "submenu": BLOCKS_MENU,    "color": (200,200,200)},
+    {"name": "GRAB SIZE","submenu": GRAB_SIZE_MENU, "color": (200,200,200)},
+    {"name": "WORLD",    "submenu": WORLD_GEN_MENU, "color": (200,200,200)},
+    {"name": "EXIT",     "action": "exit",          "color": (150,150,150)}
+]

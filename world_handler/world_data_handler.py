@@ -2,8 +2,9 @@ import struct
 import numpy as np
 from pathlib import Path
 
-CHUNK_HEADER_FMT = "<I"   # uint32 length of block in bytes
-RUN_FMT = "<I B"          # uint32 count, uint8 id
+# --- RLE helpers (still useful for memory, but not used for disk I/O) ---
+CHUNK_HEADER_FMT = "<I"
+RUN_FMT = "<I B"
 RUN_SIZE = struct.calcsize(RUN_FMT)
 
 def pack_chunk_to_bytes(chunk_voxels: np.ndarray) -> bytes:
@@ -26,17 +27,12 @@ def pack_chunk_to_bytes(chunk_voxels: np.ndarray) -> bytes:
 def unpack_chunk_from_bytes(data: bytes) -> np.ndarray:
     if not data:
         return np.empty(0, dtype=np.uint8)
-    n_runs = len(data) // RUN_SIZE
-    # view as array of runs
-    runs = np.frombuffer(data, dtype=np.uint8).reshape(-1)  # fallback
-    # safer: iterate runs but it's still fast because it's binary
     out = []
     offset = 0
     while offset + RUN_SIZE <= len(data):
         cnt, vid = struct.unpack_from(RUN_FMT, data, offset)
         out.append((cnt, vid))
         offset += RUN_SIZE
-    # preallocate
     total = sum(cnt for cnt, _ in out)
     arr = np.empty(total, dtype=np.uint8)
     pos = 0
@@ -45,31 +41,17 @@ def unpack_chunk_from_bytes(data: bytes) -> np.ndarray:
         pos += cnt
     return arr
 
-def save_world(path: Path, chunks: list):
-    with open(path, "wb") as f:
-        # write index: number of chunks then for each chunk: offset (uint64)
-        f.write(struct.pack("<I", len(chunks)))
-        index_pos = f.tell()
-        f.write(b'\x00' * (8 * len(chunks)))  # placeholder offsets
-        offsets = []
-        for i, chunk in enumerate(chunks):
-            offsets.append(f.tell())
-            data = pack_chunk_to_bytes(chunk)
-            f.write(struct.pack(CHUNK_HEADER_FMT, len(data)))
-            f.write(data)
-        # go back and write offsets
-        f.seek(index_pos)
-        for off in offsets:
-            f.write(struct.pack("<Q", off))
+# --- New: per‑chunk saving and loading with compression ---
+def save_chunk(path: Path, chunk_voxels: np.ndarray):
+    """Save a single chunk to a compressed .npz file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(path, voxels=chunk_voxels)
 
-def load_chunk_by_index(path: Path, idx: int) -> np.ndarray:
-    with open(path, "rb") as f:
-        n_chunks = struct.unpack("<I", f.read(4))[0]
-        f.seek(4 + idx * 8)
-        off = struct.unpack("<Q", f.read(8))[0]
-        f.seek(off)
-        length = struct.unpack(CHUNK_HEADER_FMT, f.read(4))[0]
-        data = f.read(length)
-        return unpack_chunk_from_bytes(data)
-
-# print(load_chunk_by_index(Path("world_data/chunks/world.dat"), 0))
+def load_chunk(path: Path) -> np.ndarray:
+    """Load a single chunk from a compressed .npz file; returns empty array if missing."""
+    try:
+        with np.load(path) as data:
+            return data['voxels']
+    except (FileNotFoundError, KeyError):
+        # No file → treat as empty chunk
+        return np.empty(0, dtype=np.uint8)

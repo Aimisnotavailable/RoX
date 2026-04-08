@@ -5,7 +5,7 @@ from utils.terrain_gen import *
 
 
 class Chunk:
-    def __init__(self, world, position):
+    def __init__(self, world, position, generator=None):
         self.engine = world.engine
         self.world = world
         self.position = position
@@ -14,6 +14,7 @@ class Chunk:
         self.voxels: np.array = None
         self.mesh: ChunkMesh = None
         self.is_empty = True
+        self.generator = generator or world.generator   # fallback
 
         self.center = (glm.vec3(self.position) + 0.5) * CHUNK_SIZE
         self.is_on_frustum = self.engine.player.frustum.is_on_frustum
@@ -40,10 +41,7 @@ class Chunk:
 
     def build_voxels(self):
         voxels = np.zeros(CHUNK_VOL, dtype='uint8')
-
-        cx, cy, cz = glm.ivec3(self.position) * CHUNK_SIZE
-        self.generate_terrain(voxels, cx, cy, cz)
-
+        self.generator.generate_chunk(voxels, self.position)   # use generator
         if np.any(voxels):
             self.is_empty = False
         return voxels
