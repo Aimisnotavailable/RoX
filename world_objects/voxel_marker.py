@@ -29,7 +29,7 @@ class VoxelMarker:
         local_model = glm.translate(glm.mat4(), glm.vec3(self.position))
         
         # Multiply by the spinning world matrix 
-        final_model = self.engine.scene.world.m_model * local_model
+        final_model = self.engine.scene.worldcontainer.local_worlds[0].m_model * local_model
         
         # STRICT PYGLM BYTE CONVERSION
         self.mesh.program['m_model'].write(final_model.to_bytes())

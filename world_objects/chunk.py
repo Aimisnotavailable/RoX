@@ -14,7 +14,7 @@ class Chunk:
         self.voxels: np.array = None
         self.mesh: ChunkMesh = None
         self.is_empty = True
-        self.generator = generator or world.generator   # fallback
+        self.generator = generator
 
         self.center = (glm.vec3(self.position) + 0.5) * CHUNK_SIZE
         self.is_on_frustum = self.engine.player.frustum.is_on_frustum

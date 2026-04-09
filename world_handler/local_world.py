@@ -4,41 +4,27 @@ from world_handler.voxel_handler import VoxelHandler
 from world_handler.world_data_handler import save_chunk, load_chunk
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from objects.world_objects import WorldObjects
 import threading
 
-from world_handler.world_generators import (
-    TerrainWorldGenerator,
-    FunctionWorldGenerator,
-    sphere_generator,
-    torus_generator,
-    cube_generator,
-    cylinder_generator,
-    sinewave_generator,
-    wave_generator,
-    hill_generator,
-    pyramid_generator,
-    goursat_generator,
-    steinmetz_generator,
-    heart_generator,
-    spiked_sphere_generator,
-    rounded_octahedron_generator,
-    mobius_generator,
-)
 
 
-class World:
-    def __init__(self, engine, new_world=False, generator_type='terrain', build_meshes=True, **gen_kwargs):
+class LocalWorld:
+    def __init__(self, engine):
         self.engine = engine
         self.chunks = [None for _ in range(WORLD_VOL)]
         self.voxels = np.empty([WORLD_VOL, CHUNK_VOL], dtype='uint8')
-        self.new_world = new_world
         self.position = glm.vec3(0, 0, 0)
-        self.generator_type = generator_type
-        self.generator_params = gen_kwargs
-        self.generator = self._create_generator(generator_type, **gen_kwargs)
+        self.objects : List[WorldObjects] = [WorldObjects('sphere')]
+        self.new_world = False
+
+        build_meshes = True
+        new_world = True
+        self.new_world = new_world
 
         # Background saver for chunks (non‑blocking I/O)
-        self.save_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="chunk_saver")
+        # Disable background saving for now
+        # self.save_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="chunk_saver")
 
         if new_world:
             get_logger_info("DEBUG", f"Time : {datetime.now()}")
@@ -55,49 +41,7 @@ class World:
         self.world_scale = 1.0
         self.world_swapping = False
 
-    def _create_generator(self, generator_type, **kwargs):
-        # Default center for shape generators if not provided
-        if generator_type in list(WORLD_GEN_PARAMS) and not generator_type in ('sinewave', 'wave'):
-            if 'center' not in kwargs:
-                kwargs['center'] = (
-                    WORLD_W * CHUNK_SIZE // 2,
-                    WORLD_H * CHUNK_SIZE // 2,
-                    WORLD_D * CHUNK_SIZE // 2
-                )
-                kwargs.update(WORLD_GEN_PARAMS[generator_type])
-
-        if generator_type == 'terrain':
-            return TerrainWorldGenerator()
-        elif generator_type == 'sphere':
-            return sphere_generator(**kwargs)
-        elif generator_type == 'torus':
-            return torus_generator(**kwargs)
-        elif generator_type == 'cube':
-            return cube_generator(**kwargs)
-        elif generator_type == 'cylinder':
-            return cylinder_generator(**kwargs)
-        elif generator_type == 'sinewave':
-            return sinewave_generator(**kwargs)
-        elif generator_type == 'wave':
-            return wave_generator(**kwargs)
-        elif generator_type == 'hill':
-            return hill_generator(**kwargs)
-        elif generator_type == 'pyramid':
-            return pyramid_generator(**kwargs)
-        elif generator_type == 'goursat':
-            return goursat_generator(**kwargs)
-        elif generator_type == 'steinmetz':
-            return steinmetz_generator(**kwargs)
-        elif generator_type == 'heart':
-            return heart_generator(**kwargs)
-        elif generator_type == 'spiked_sphere':
-            return spiked_sphere_generator(**kwargs)
-        elif generator_type == 'rounded_octahedron':
-            return rounded_octahedron_generator(**kwargs)
-        elif generator_type == 'mobius':
-            return mobius_generator(**kwargs)
-        else:
-            raise ValueError(f"Unknown generator type: {generator_type}")
+    
 
     @property
     def m_model(self):
@@ -178,8 +122,10 @@ class World:
             self.chunks[i] = None
         self.voxels.fill(0)
 
+        generator = self.objects[0].generator
+        print(generator)
         # Bounding box pruning
-        bbox = self.generator.get_bounding_box() if hasattr(self.generator, 'get_bounding_box') else None
+        bbox = generator.get_bounding_box() if hasattr(generator, 'get_bounding_box') else None
         positions = []
         indices = []
 
@@ -203,7 +149,7 @@ class World:
                 for y in range(WORLD_H):
                     for z in range(WORLD_D):
                         idx = x + WORLD_W * z + WORLD_AREA * y
-                        positions.append((x, y, z))
+                        positions.append(glm.vec3(x, y, z))
                         indices.append(idx)
 
         # Generate chunks in parallel and save each immediately
@@ -233,7 +179,7 @@ class World:
 
     def _generate_chunk_data(self, pos, idx):
         """Generate voxels and schedule background save (non‑blocking)."""
-        chunk = Chunk(self, position=pos, generator=self.generator)
+        chunk = Chunk(self, position=pos, generator=self.objects[0].generator)
         voxels = chunk.build_voxels()
         chunk.voxels = voxels
 
@@ -287,7 +233,7 @@ class World:
     def render(self):
         for chunk in self.chunks:
             if chunk:
-                # chunk.position = glm.vec3(0 if (chunk.position[0] < chunk.base_pos[0] * 2) else (chunk.position[0] + 0.01), chunk.position[1], chunk.position[2])
+                chunk.world_position = chunk.position + self.position
                 chunk.render()
 
     def shutdown(self):

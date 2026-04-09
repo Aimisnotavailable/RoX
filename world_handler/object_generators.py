@@ -1,4 +1,4 @@
-# world_generators.py
+# object_generators.py
 import numpy as np
 from settings import *
 from numba import njit

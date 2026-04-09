@@ -1,7 +1,7 @@
 # scene.py
 from settings import *
 import moderngl as mgl
-from world_handler.world import World
+from world_handler.local_world_container import WorldContainer
 from world_objects.voxel_marker import VoxelMarker
 from world_objects.water import Water
 from world_objects.clouds import Clouds
@@ -14,10 +14,10 @@ from world_objects.raycast_ray import RayCastRay
 class Scene:
     def __init__(self, engine):
         self.engine = engine
-        self.world = World(self.engine, new_world=True, generator_type='sphere', build_meshes=True)
-        self._pending_world = None
+        self.worldcontainer = WorldContainer(self.engine)
+        # self._pending_world = None
 
-        self.voxel_marker = VoxelMarker(self.world.voxel_handler)
+        self.voxel_marker = VoxelMarker(self.worldcontainer.local_worlds[0].voxel_handler)
         self.water = Water(engine)
         self.clouds = Clouds(engine)
         
@@ -32,15 +32,15 @@ class Scene:
         self.hud = HUD(engine)
 
     def update(self):
-        if self._pending_world is not None:
-            new_world = self._pending_world
-            self.world = new_world
-            self.voxel_marker.handler = new_world.voxel_handler
-            self._pending_world = None
-            # Build meshes for the new world (in main thread)
-            new_world.build_chunk_mesh()
+        # if self._pending_world is not None:
+        #     new_world = self._pending_world
+        #     self.world = new_world
+        #     self.voxel_marker.handler = new_world.voxel_handler
+        #     self._pending_world = None
+        #     # Build meshes for the new world (in main thread)
+        #     new_world.build_chunk_mesh()
 
-        self.world.update()
+        self.worldcontainer.update()
         self.voxel_marker.update()
         self.clouds.update()
 
@@ -54,7 +54,7 @@ class Scene:
 
     def render(self):
         # chunks rendering
-        self.world.render()
+        self.worldcontainer.render()
 
         # rendering without cull face
         self.engine.ctx.disable(mgl.CULL_FACE)

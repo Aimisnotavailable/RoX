@@ -389,8 +389,8 @@ class HUD:
         if not ar:
             return
 
-        vh = self.engine.scene.world.voxel_handler
-        world = self.engine.scene.world
+        vh = self.engine.scene.worldcontainer.local_worlds[0].voxel_handler
+        world = self.engine.scene.worldcontainer.local_worlds[0]
         block_map = {1: "SAND", 2: "GRASS", 3: "DIRT", 4: "STONE", 5: "SNOW", 6: "LEAVES", 7: "WOOD"}
         current_block = block_map.get(vh.new_voxel_id, "UNKNOWN")
         mode_str = INTERACTION_MODE[vh.interaction_mode]
@@ -403,7 +403,7 @@ class HUD:
             f"BLOCK: {current_block}",
             f"MODE: {mode_str}",
             f"SCALE: {world.world_scale:.2f}x",
-            f"GEN: {world.generator_type.capitalize()}"
+            # f"GEN: {world.generator_type.capitalize()}"
         ]
         y = info_rect.y + 20
         for i, line in enumerate(lines):
@@ -519,11 +519,11 @@ class HUD:
         self._draw_animated_message()
 
         # ---- Loading overlay ----
-        if getattr(self.engine.scene.world, 'world_swapping', False):
-            overlay = pg.Surface(self.res, pg.SRCALPHA)
-            overlay.fill((0, 0, 0, 180))
-            self.surface.blit(overlay, (0, 0))
-            self.draw_text_centered("REGENERATING WORLD...", pg.Rect(0,0,self.res[0],self.res[1]), (255,255,100), self.big_font)
+        # if getattr(self.engine.scene.world, 'world_swapping', False):
+        #     overlay = pg.Surface(self.res, pg.SRCALPHA)
+        #     overlay.fill((0, 0, 0, 180))
+        #     self.surface.blit(overlay, (0, 0))
+        #     self.draw_text_centered("REGENERATING WORLD...", pg.Rect(0,0,self.res[0],self.res[1]), (255,255,100), self.big_font)
 
     def render(self):
         self.update_surface()
