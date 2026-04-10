@@ -25,13 +25,15 @@ class VoxelMarker:
     def set_uniform(self):
         self.mesh.program['mode_id'] = self.handler.interaction_mode
         
-        # Get the active local world (you might need to handle multiple worlds later)
         lw = self.handler.local_world
+        if lw is None:
+            # Fallback (should not happen if raycast succeeded)
+            lw = self.engine.scene.world_container.local_worlds[0]
         
-        # Convert world position to local space relative to this world's origin
+        # Convert world block coordinate to local block coordinate
         local_pos = glm.ivec3(self.position) - lw.position
         
-        # Model matrix: translate to local position, then apply world's rotation/scale
+        # Scale to world units (meters) because m_model expects that
         local_model = glm.translate(glm.mat4(), glm.vec3(local_pos))
         final_model = lw.m_model * local_model
         
