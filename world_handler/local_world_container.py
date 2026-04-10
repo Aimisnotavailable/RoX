@@ -12,6 +12,7 @@ class WorldContainer:
     def __init__(self, engine):
         self.engine = engine
         self.local_worlds : list[LocalWorld] = [LocalWorld(self.engine)]
+        # self.voxel_handler = VoxelHandler(world)
     
     def update(self):
         for local_world in self.local_worlds:

@@ -1,6 +1,6 @@
 from settings import *
 
-from world_handler.object_generators import (
+from objects.object_generators_func import (
     TerrainWorldGenerator,
     FunctionWorldGenerator,
     sphere_generator,
