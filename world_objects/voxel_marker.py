@@ -25,13 +25,16 @@ class VoxelMarker:
     def set_uniform(self):
         self.mesh.program['mode_id'] = self.handler.interaction_mode
         
-        # Calculate local marker position
-        local_model = glm.translate(glm.mat4(), glm.vec3(self.position))
+        # Get the active local world (you might need to handle multiple worlds later)
+        lw = self.handler.local_world
         
-        # Multiply by the spinning world matrix 
-        final_model = self.engine.scene.worldcontainer.local_worlds[0].m_model * local_model
+        # Convert world position to local space relative to this world's origin
+        local_pos = glm.ivec3(self.position) - lw.position
         
-        # STRICT PYGLM BYTE CONVERSION
+        # Model matrix: translate to local position, then apply world's rotation/scale
+        local_model = glm.translate(glm.mat4(), glm.vec3(local_pos))
+        final_model = lw.m_model * local_model
+        
         self.mesh.program['m_model'].write(final_model.to_bytes())
 
     def get_model_matrix(self):

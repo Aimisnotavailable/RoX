@@ -5,15 +5,14 @@ import math
 from settings import *
 from meshes.chunk_mesh_builder import get_chunk_index
 from scripts.logger import get_logger_info
-from world_handler.local_world_container import WorldContainer
+        
 class VoxelHandler:
-    def __init__(self, world_container : WorldContainer):
-        self.world_container = world_container
-        self.engine = world_container.engine
-        self.local_worlds = world_container.local_worlds
+    def __init__(self, world):
+        self.world = world
+        self.engine = world.engine
+        self.chunks = world.chunks
 
         # --- Ray Casting Result State ---
-        self.local_world = None
         self.chunk = None
         self.voxel_id = None
         self.voxel_index = None
@@ -252,10 +251,11 @@ class VoxelHandler:
 
         while not (max_x > 1.0 and max_y > 1.0 and max_z > 1.0):
             result = self.get_voxel_id(voxel_world_pos=current_voxel_pos)
+            
             if result[0]:
                 self.voxel_id, self.voxel_index, self.voxel_local_pos, self.chunk = result
                 self.voxel_world_pos = current_voxel_pos
-
+                get_logger_info('GAME', f"{' | '.join(map(str, result))} {current_voxel_pos}")
                 if step_dir == 0: self.voxel_normal.x = -dx
                 elif step_dir == 1: self.voxel_normal.y = -dy
                 else: self.voxel_normal.z = -dz

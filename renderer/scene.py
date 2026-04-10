@@ -14,10 +14,10 @@ from world_objects.raycast_ray import RayCastRay
 class Scene:
     def __init__(self, engine):
         self.engine = engine
-        self.worldcontainer = WorldContainer(self.engine)
+        self.world_container = WorldContainer(self.engine)
         # self._pending_world = None
 
-        self.voxel_marker = VoxelMarker(self.worldcontainer.local_worlds[0].voxel_handler)
+        self.voxel_marker = VoxelMarker(self.world_container.voxel_handler)
         self.water = Water(engine)
         self.clouds = Clouds(engine)
         
@@ -40,7 +40,7 @@ class Scene:
         #     # Build meshes for the new world (in main thread)
         #     new_world.build_chunk_mesh()
 
-        self.worldcontainer.update()
+        self.world_container.update()
         self.voxel_marker.update()
         self.clouds.update()
 
@@ -54,7 +54,7 @@ class Scene:
 
     def render(self):
         # chunks rendering
-        self.worldcontainer.render()
+        self.world_container.render()
 
         # rendering without cull face
         self.engine.ctx.disable(mgl.CULL_FACE)

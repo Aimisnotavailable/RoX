@@ -14,7 +14,7 @@ class LocalWorld:
         self.engine = engine
         self.chunks = [None for _ in range(WORLD_VOL)]
         self.voxels = np.empty([WORLD_VOL, CHUNK_VOL], dtype='uint8')
-        self.position = glm.vec3(0, 0, 0)
+        self.position = glm.ivec3(0, 0, 0)
         self.objects : List[WorldObjects] = [WorldObjects('sphere')]
         self.new_world = False
 
@@ -34,7 +34,6 @@ class LocalWorld:
                 self.build_chunk_mesh()
             get_logger_info("DEBUG", f"WORLD BUILDING DONE")
             get_logger_info("DEBUG", f"Time : {datetime.now()}")
-        self.voxel_handler = VoxelHandler(self)
 
         self.world_yaw = 0.0
         self.world_pitch = 0.0
@@ -62,7 +61,6 @@ class LocalWorld:
             y = int(local_player_pos.y // CHUNK_SIZE)
             z = int(local_player_pos.z // CHUNK_SIZE)
             self.load_visible_chunks(x, y, z)
-        self.voxel_handler.update()
 
     def load_visible_chunks(self, center_x, center_y, center_z):
         WORLD_W_local = WORLD_W
@@ -235,6 +233,43 @@ class LocalWorld:
             if chunk:
                 chunk.world_position = chunk.position + self.position
                 chunk.render()
+    
+    def contains(self, world_pos: glm.vec3) -> bool:
+        """Check if a world position is inside this local world's bounds."""
+        local = world_pos - self.position
+        return (0 <= local.x < WORLD_W * CHUNK_SIZE and
+                0 <= local.y < WORLD_H * CHUNK_SIZE and
+                0 <= local.z < WORLD_D * CHUNK_SIZE)
+
+    def get_voxel(self, world_pos: glm.vec3) -> tuple[int, glm.ivec3, Chunk] | None:
+        """Return (voxel_id, local_position_in_chunk, chunk) or None if air/outside."""
+        if not self.contains(world_pos):
+            return None
+
+        local = world_pos - self.position
+        wx = int(local.x)
+        wy = int(local.y)
+        wz = int(local.z)
+
+        cx = wx // CHUNK_SIZE
+        cy = wy // CHUNK_SIZE
+        cz = wz // CHUNK_SIZE
+
+        chunk_index = cx + WORLD_W * cz + WORLD_AREA * cy
+        chunk = self.chunks[chunk_index]
+        if chunk is None:
+            return None
+
+        lx = wx - cx * CHUNK_SIZE
+        ly = wy - cy * CHUNK_SIZE
+        lz = wz - cz * CHUNK_SIZE
+        voxel_index = lx + CHUNK_SIZE * lz + CHUNK_AREA * ly
+        voxel_id = chunk.voxels[voxel_index]
+
+        if voxel_id == 0:
+            return None
+        return voxel_id, glm.ivec3(lx, ly, lz), chunk, voxel_index
+
 
     def shutdown(self):
         """Call this when destroying the world to flush pending saves."""

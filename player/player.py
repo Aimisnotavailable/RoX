@@ -86,8 +86,8 @@ class Player:
         
         # --- NEW: UPDATE FRUSTUM ---
         # Get inverse matrix and scale, then pass them to the active frustum
-        inv_model = glm.inverse(self.engine.scene.worldcontainer.local_worlds[0].m_model)
-        scale = self.engine.scene.worldcontainer.local_worlds[0].world_scale
+        inv_model = glm.inverse(self.engine.scene.world_container.local_worlds[0].m_model)
+        scale = self.engine.scene.world_container.local_worlds[0].world_scale
         self.active_camera.frustum.update(inv_model, scale)
 
     def handle_event(self, event):
@@ -100,11 +100,11 @@ class Player:
                 gtype = list(WORLD_GEN_PARAMS)[self.gen]
                 self.engine.scene.world.regenerate_world(gtype, **WORLD_GEN_PARAMS[gtype])
             elif event.key == pygame.K_g:
-                self.engine.scene.world.position[0] += 1
+                self.engine.scene.world_container.local_worlds[0].position[0] += 1
                 
         # Voxel handling (Clicks)
         if event.type == pg.MOUSEBUTTONDOWN:
-            voxel_handler = self.engine.scene.world.voxel_handler
+            voxel_handler = self.engine.scene.world_container.voxel_handler
             if event.button == 1:
                 voxel_handler.set_voxel()
             if event.button == 3:
@@ -167,21 +167,21 @@ class Player:
         
         scale_speed = 2.0 * self.engine.delta_time * 0.001
         if key_state[pg.K_x]: 
-            self.engine.scene.worldcontainer.local_worlds[0].world_scale += scale_speed
+            self.engine.scene.world_container.local_worlds[0].world_scale += scale_speed
         if key_state[pg.K_z]: 
-            self.engine.scene.worldcontainer.local_worlds[0].world_scale -= scale_speed
+            self.engine.scene.world_container.local_worlds[0].world_scale -= scale_speed
             
-        self.engine.scene.worldcontainer.local_worlds[0].world_scale = glm.clamp(self.engine.scene.worldcontainer.local_worlds[0].world_scale, 0.1, 5.0)
+        self.engine.scene.world_container.local_worlds[0].world_scale = glm.clamp(self.engine.scene.world_container.local_worlds[0].world_scale, 0.1, 5.0)
 
         rotation_speed = 2.0 * self.engine.delta_time * 0.001
         if key_state[pg.K_LEFT]: 
-            self.engine.scene.worldcontainer.local_worlds[0].world_yaw -= rotation_speed
+            self.engine.scene.world_container.local_worlds[0].world_yaw -= rotation_speed
         if key_state[pg.K_RIGHT]: 
-            self.engine.scene.worldcontainer.local_worlds[0].world_yaw += rotation_speed
+            self.engine.scene.world_container.local_worlds[0].world_yaw += rotation_speed
         if key_state[pg.K_UP]: 
-            self.engine.scene.worldcontainer.local_worlds[0].world_pitch -= rotation_speed
+            self.engine.scene.world_container.local_worlds[0].world_pitch -= rotation_speed
         if key_state[pg.K_DOWN]: 
-            self.engine.scene.worldcontainer.local_worlds[0].world_pitch += rotation_speed
+            self.engine.scene.world_container.local_worlds[0].world_pitch += rotation_speed
 
         # Reset speed if no movement keys are pressed
         if not (key_state[pg.K_w] or key_state[pg.K_s] or

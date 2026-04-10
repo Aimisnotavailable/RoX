@@ -389,8 +389,8 @@ class HUD:
         if not ar:
             return
 
-        vh = self.engine.scene.worldcontainer.local_worlds[0].voxel_handler
-        world = self.engine.scene.worldcontainer.local_worlds[0]
+        vh = self.engine.scene.world_container.voxel_handler
+        world = self.engine.scene.world_container.local_worlds[0]
         block_map = {1: "SAND", 2: "GRASS", 3: "DIRT", 4: "STONE", 5: "SNOW", 6: "LEAVES", 7: "WOOD"}
         current_block = block_map.get(vh.new_voxel_id, "UNKNOWN")
         mode_str = INTERACTION_MODE[vh.interaction_mode]
