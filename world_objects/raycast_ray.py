@@ -6,6 +6,7 @@ from meshes.cylinder_mesh import CylinderMesh
 # Fix visual beam lock
 # Fix raycast method
 # reuse raycast method from voxel handler
+
 class RayCastRay:
     """Visual beam from index fingertip to the currently targeted block,
        accounting for world rotation and scaling."""
@@ -64,7 +65,7 @@ class RayCastRay:
         self.start_pos = cam.position + world_dir * distance
 
         # Get the targeted block world position from the voxel handler
-        vh = self.engine.scene.world.voxel_handler
+        vh = self.engine.scene.world_container.voxel_handler
 
         if ar.is_grabbing:
             self.visible = False
@@ -76,10 +77,7 @@ class RayCastRay:
                 pos = vh.place_pos
             # Block's local lower corner, convert to center in local coordinates
             local_center = glm.vec3(pos) + glm.vec3(0.5)
-            # Apply world transform (rotation + scale) to get global position
-            world = self.engine.scene.world
-            global_center = world.m_model * glm.vec4(local_center, 1.0)
-            self.end_pos = glm.vec3(global_center)
+            self.end_pos = glm.vec3(local_center)
             self.visible = True
         else:
             self.visible = False

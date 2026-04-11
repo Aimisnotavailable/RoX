@@ -18,6 +18,8 @@ class LocalWorld:
         self.objects : List[WorldObjects] = [WorldObjects('sphere')]
         self.new_world = False
 
+        self.rotation = (random.random() + 0.2, random.random() * math.pi * 2)
+
         build_meshes = True
         new_world = True
         self.new_world = new_world
@@ -35,8 +37,8 @@ class LocalWorld:
             get_logger_info("DEBUG", f"WORLD BUILDING DONE")
             get_logger_info("DEBUG", f"Time : {datetime.now()}")
 
-        self.world_yaw = 0.0
-        self.world_pitch = 0.0
+        self.world_yaw = self.rotation[0]
+        self.world_pitch = self.rotation[1]
         self.world_scale = 1.0
         self.world_swapping = False
 
@@ -62,6 +64,8 @@ class LocalWorld:
             z = int(local_player_pos.z // CHUNK_SIZE)
             self.load_visible_chunks(x, y, z)
 
+        self.world_yaw += self.rotation[0] * self.engine.delta_time * 0.001
+        
     def load_visible_chunks(self, center_x, center_y, center_z):
         WORLD_W_local = WORLD_W
         WORLD_H_local = WORLD_H

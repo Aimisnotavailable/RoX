@@ -220,7 +220,7 @@ class VoxelHandler:
 
     def raycast_generic(self, origin: glm.vec3, direction: glm.vec3, is_rts: bool):
         """Perform DDA raycasting in world space, querying WorldContainer."""
-        max_dist = 60.0
+        max_dist = MAX_RAY_DIST
         x1, y1, z1 = origin
         x2, y2, z2 = origin + direction * max_dist
 

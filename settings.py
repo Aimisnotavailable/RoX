@@ -4,6 +4,7 @@ import glm
 import math
 import json
 import pygame
+import random
 from pathlib import Path
 from scripts.logger import get_logger_info
 
@@ -27,7 +28,7 @@ WIN_RES = glm.vec2(1600, 900)
 SEED = 11405
 
 # ray casting
-MAX_RAY_DIST = 6
+MAX_RAY_DIST = 300
 
 # chunk
 CHUNK_SIZE = 48
@@ -149,7 +150,7 @@ GRAB_SIZE_MENU = [
 
 
 WORLD_GEN_PARAMS = {
-    "sphere":   {"radius": 240},
+    "sphere":   {"radius": 80},
     "torus":    {"R": 80, "r": 20},
     "cube":     {"half_size": 80},
     # "cylinder": {"radius": 40, "height": 80, "axis": "y"},

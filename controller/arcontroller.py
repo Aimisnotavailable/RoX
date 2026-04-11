@@ -124,7 +124,7 @@ class ARController:
         screen_x = tip_norm.x * WIN_RES[0]
         screen_y = tip_norm.y * WIN_RES[1]
 
-        vh = self.engine.scene.world.voxel_handler
+        vh = self.engine.scene.world_container.voxel_handler
         origin, direction = vh.get_rts_ray(screen_pos=(screen_x, screen_y))
         inv_model = glm.inverse(self.engine.scene.world.m_model)
         local_origin = glm.vec3(inv_model * glm.vec4(origin, 1.0))
@@ -177,10 +177,10 @@ class ARController:
                     elif ev.event_type == 'END':
                         if not self.pinch_hold_emitted['LEFT']:
                             get_logger_info('DEBUG', 'Left quick pinch – toggling mode')
-                            self.engine.scene.world.voxel_handler.switch_mode()
+                            self.engine.scene.world_container.voxel_handler.switch_mode()
                         self.pinch_active_left = False
                 elif ev.hand == 'RIGHT':
-                    vh = self.engine.scene.world.voxel_handler
+                    vh = self.engine.scene.world_container.voxel_handler
                     if vh.interaction_mode == 2:  # GRAB mode
                         if ev.event_type == 'START' and not self.is_grabbing:
                             center = self.right_point_hit_pos or self.get_block_under_hand(self.smooth_right_landmarks)
@@ -264,7 +264,7 @@ class ARController:
             # ----- OPEN PALM (RIGHT) -----
             elif ev.gesture_name == 'open_palm' and ev.hand == 'RIGHT':
                 if ev.event_type == 'START':
-                    vh = self.engine.scene.world.voxel_handler
+                    vh = self.engine.scene.world_container.voxel_handler
                     if vh.interaction_mode == 3:
                         if self.last_right_point_hit_pos is not None:
                             self.show_block_info(self.last_right_point_hit_pos)
@@ -286,7 +286,7 @@ class ARController:
 
             # ----- POINT (RIGHT) – menu navigation or grab target -----
             elif ev.gesture_name == 'point' and ev.hand == 'RIGHT':
-                vh = self.engine.scene.world.voxel_handler
+                vh = self.engine.scene.world_container.voxel_handler
                 if self.radial_menu_active:
                     # Navigate radial menu (world generation)
                     if ev.event_type == 'UPDATE' and ev.value is not None:
@@ -385,7 +385,7 @@ class ARController:
         half = self.grab_size // 2
         min_corner = (target_center[0] - half, target_center[1] - half, target_center[2] - half)
 
-        vh = self.engine.scene.world.voxel_handler
+        vh = self.engine.scene.world_container.voxel_handler
         target_positions = []
         for offset in self.grabbed_region_offset:
             wx = int(min_corner[0] + offset[0])
@@ -483,7 +483,7 @@ class ARController:
 
         # Specific actions
         if "voxel_id" in option:
-            self.engine.scene.world.voxel_handler.new_voxel_id = option["voxel_id"]
+            self.engine.scene.world_container.voxel_handler.new_voxel_id = option["voxel_id"]
             self.close_radial_menu()
         elif "size" in option:
             self.grab_size = option["size"]
@@ -503,7 +503,7 @@ class ARController:
     def show_block_info(self, world_pos):
         if world_pos is None:
             return
-        vh = self.engine.scene.world.voxel_handler
+        vh = self.engine.scene.world_container.voxel_handler
         voxel_id, idx, local_pos, chunk = vh.get_voxel_id(world_pos)
         if voxel_id != 0:
             block_name = {1:"SAND",2:"GRASS",3:"DIRT",4:"STONE",
