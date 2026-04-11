@@ -30,11 +30,11 @@ class VoxelMarker:
             # Fallback (should not happen if raycast succeeded)
             lw = self.engine.scene.world_container.local_worlds[0]
         
-        # Convert world block coordinate to local block coordinate
-        local_pos = glm.ivec3(self.position) - lw.position
+        # # Convert world block coordinate to local block coordinate
+        # local_pos = glm.ivec3(self.position)
         
         # Scale to world units (meters) because m_model expects that
-        local_model = glm.translate(glm.mat4(), glm.vec3(local_pos))
+        local_model = glm.translate(glm.mat4(), glm.vec3(self.position))
         final_model = lw.m_model * local_model
         
         self.mesh.program['m_model'].write(final_model.to_bytes())

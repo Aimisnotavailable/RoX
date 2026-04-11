@@ -80,15 +80,14 @@ class Player:
         self.keyboard_control()
         if self.mode == "FPS":
             self.mouse_control()
-            
+
         # Update whichever camera is active
         self.active_camera.update()
         
         # --- NEW: UPDATE FRUSTUM ---
         # Get inverse matrix and scale, then pass them to the active frustum
         inv_model = glm.inverse(self.engine.scene.world_container.local_worlds[0].m_model)
-        scale = self.engine.scene.world_container.local_worlds[0].world_scale
-        self.active_camera.frustum.update(inv_model, scale)
+        self.active_camera.frustum.update(inv_model)
 
     def handle_event(self, event):
         # Toggle camera mode

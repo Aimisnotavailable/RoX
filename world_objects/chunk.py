@@ -29,7 +29,7 @@ class Chunk:
         final_model = self.world.m_model * local_model
         
         self.mesh.program['m_model'].write(final_model)
-        self.center = (glm.vec3(self.position) + 0.5) * CHUNK_SIZE
+        self.center = glm.vec3(self.position) * CHUNK_SIZE + glm.vec3(self.world.position) + 0.5 * CHUNK_SIZE
         
     def build_mesh(self):
         self.mesh = ChunkMesh(self)

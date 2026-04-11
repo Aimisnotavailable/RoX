@@ -148,10 +148,12 @@ class VoxelHandler:
         if self.snap_normal is None or self.exact_pos is None:
             return glm.vec2(0)
 
-        # Retrieve model matrix from the local world containing the exact position
-        lw = self.world_container.get_local_world_at(self.exact_pos)
+        # Use integer world position for world lookup
+        exact_ivec = glm.ivec3(glm.round(self.exact_pos))
+        lw = self.world_container.get_local_world_at(exact_ivec)
         m_model = lw.m_model if lw else glm.mat4(1.0)
 
+        # Continue using self.exact_pos (float) for precise screen projection
         p1 = m_model * glm.vec4(self.exact_pos, 1.0)
         p2 = m_model * glm.vec4(self.exact_pos + glm.vec3(self.snap_normal), 1.0)
 

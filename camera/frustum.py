@@ -19,7 +19,7 @@ class Frustum:
         self.local_near = NEAR
         self.local_far = FAR
 
-    def update(self, inv_model, world_scale):
+    def update(self, inv_model, world_scale = 1):
         # 1. Transform Camera Position to Local Space (w=1.0 for points)
         self.local_pos = glm.vec3(inv_model * glm.vec4(self.cam.position, 1.0))
 
@@ -31,7 +31,7 @@ class Frustum:
         # 3. Adjust Near/Far planes based on zoom scale!
         self.local_near = NEAR / world_scale
         self.local_far = FAR / world_scale
-
+        
     def is_on_frustum(self, chunk):
         # We now use the LOCAL camera position and vectors!
         sphere_vec = chunk.center - self.local_pos

@@ -121,7 +121,6 @@ class LocalWorld:
         self.voxels.fill(0)
 
         generator = self.objects[0].generator
-        print(generator)
         # Bounding box pruning
         bbox = generator.get_bounding_box() if hasattr(generator, 'get_bounding_box') else None
         positions = []
