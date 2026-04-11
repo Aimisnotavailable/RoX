@@ -408,6 +408,18 @@ class HUD:
         y = info_rect.y + 20
         for i, line in enumerate(lines):
             self.draw_text(line, (info_rect.x + 20, y + i*22), (220, 230, 255), self.font, anchor='topleft')
+        
+        # ---- Object selection info ----
+        selected = self.engine.scene.world_container.selected_object
+        if selected:
+            obj_rect = pg.Rect(20, 180, 300, 100)
+            self.draw_glass_panel(obj_rect)
+            pos = selected.position
+            euler = glm.eulerAngles(selected.rotation)
+            self.draw_text(f"OBJ: {type(selected).__name__}", (obj_rect.x+20, obj_rect.y+15), (255,200,100), self.font)
+            self.draw_text(f"Pos: ({pos.x:.1f}, {pos.y:.1f}, {pos.z:.1f})", (obj_rect.x+20, obj_rect.y+35), (200,220,255), self.small_font)
+            self.draw_text(f"Rot: ({math.degrees(euler.x):.0f}, {math.degrees(euler.y):.0f}, {math.degrees(euler.z):.0f})", (obj_rect.x+20, obj_rect.y+55), (200,220,255), self.small_font)
+            self.draw_text(f"Scl: {selected.scale.x:.2f}", (obj_rect.x+20, obj_rect.y+75), (200,220,255), self.small_font)
 
         # ---- Hand status (circular) ----
         left_status = "STANDBY"

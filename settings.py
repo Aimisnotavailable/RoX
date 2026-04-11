@@ -100,8 +100,8 @@ CLOUD_SCALE = 25
 CLOUD_HEIGHT = WORLD_H * CHUNK_SIZE * 2
 
 # WORLD
-INTERACTION_MODE = ['REMOVE', 'ADD', 'GRAB', 'VIEWING']
-INTERACTION_COLORS = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)]
+INTERACTION_MODE = ['REMOVE', 'ADD', 'GRAB', 'VIEWING', 'OBJECT']
+INTERACTION_COLORS = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 165, 0)]
 
 # -------------------- DEPTH INTEGRATION --------------------
 # AR depth gesture settings

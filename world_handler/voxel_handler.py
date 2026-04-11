@@ -4,6 +4,7 @@ import glm
 import math
 from settings import *
 from scripts.logger import get_logger_info
+from world_objects.selectable_object import SelectableObject
 
 class VoxelHandler:
     def __init__(self, world_container):
@@ -19,7 +20,11 @@ class VoxelHandler:
         self.voxel_world_pos: glm.ivec3 | None = None
         self.voxel_normal: glm.ivec3 | None = None
 
-        self.interaction_mode = 0  # 0: remove, 1: add, 2: grab
+        # Object hit result
+        self.object_hit: SelectableObject | None = None
+        self.object_hit_dist: float | None = None
+
+        self.interaction_mode = 0  # 0: remove, 1: add, 2: grab, 3: viewing, 4: object
         self.new_voxel_id = WOOD
 
         # --- Drag state ---
@@ -82,7 +87,7 @@ class VoxelHandler:
 
         # 1. START DRAG
         if mouse_pressed and not self.is_dragging:
-            if self.voxel_id and self.voxel_normal:
+            if self.voxel_id and self.voxel_normal and self.interaction_mode != 4:
                 self.is_dragging = True
                 if self.interaction_mode == 0:  # REMOVE
                     self.snap_normal = -glm.vec3(self.voxel_normal)
@@ -110,10 +115,6 @@ class VoxelHandler:
                 screen_dir = self.get_screen_axis_direction()
 
                 speed_factor = 1.0
-                # Optional depth scaling for speed
-                # if current_depth is not None:
-                #     speed_factor = max(Z_DRAG_SPEED_MIN, min(Z_DRAG_SPEED_MAX, 1.0 + (current_depth - 0.5) * 1.5))
-
                 if self.drag_start_depth is not None and current_depth is not None:
                     delta_z = current_depth - self.drag_start_depth
                     self.brush_mult = 1.0 + delta_z * RIGHT_BRUSH_SENSITIVITY
@@ -148,12 +149,11 @@ class VoxelHandler:
         if self.snap_normal is None or self.exact_pos is None:
             return glm.vec2(0)
 
-        # Use integer world position for world lookup
-        exact_ivec = glm.ivec3(glm.round(self.exact_pos))
-        lw = self.world_container.get_local_world_at(exact_ivec)
-        m_model = lw.m_model if lw else glm.mat4(1.0)
+        lw = self.local_world
+        if lw is None:
+            return glm.vec2(0)
 
-        # Continue using self.exact_pos (float) for precise screen projection
+        m_model = lw.m_model
         p1 = m_model * glm.vec4(self.exact_pos, 1.0)
         p2 = m_model * glm.vec4(self.exact_pos + glm.vec3(self.snap_normal), 1.0)
 
@@ -172,7 +172,7 @@ class VoxelHandler:
         return screen_dir / length if length > 0.0001 else glm.vec2(0)
 
     # ==========================================
-    # --- 3D RAYCASTING ---
+    # --- 3D RAYCASTING (global coordinates) ---
     # ==========================================
 
     def get_rts_ray(self, screen_pos=None):
@@ -219,7 +219,32 @@ class VoxelHandler:
         self.raycast_generic(origin, direction, is_rts=True)
 
     def raycast_generic(self, origin: glm.vec3, direction: glm.vec3, is_rts: bool):
-        """Perform DDA raycasting in world space, querying WorldContainer."""
+        """
+        Perform DDA raycasting in **global world space**.
+        Queries WorldContainer for voxels across all LocalWorlds.
+        Also checks for object hits if in OBJECT mode.
+        """
+        # Reset results
+        self.voxel_id = None
+        self.voxel_normal = None
+        self.local_world = None
+        self.chunk = None
+        self.voxel_index = None
+        self.voxel_local_pos = None
+        self.voxel_world_pos = None
+        self.object_hit = None
+        self.object_hit_dist = None
+
+        # First, if in OBJECT mode, try object raycast
+        if self.interaction_mode == 4:   # OBJECT mode
+            obj_hit = self.world_container.raycast_object(origin, direction)
+            if obj_hit:
+                self.object_hit, self.object_hit_dist = obj_hit
+                # For visualization, set a dummy voxel_world_pos at the hit point
+                self.voxel_world_pos = glm.ivec3(glm.round(origin + direction * self.object_hit_dist))
+                return True
+
+        # Voxel DDA
         max_dist = MAX_RAY_DIST
         x1, y1, z1 = origin
         x2, y2, z2 = origin + direction * max_dist
@@ -238,15 +263,6 @@ class VoxelHandler:
         dz = glm.sign(z2 - z1)
         delta_z = min(dz / (z2 - z1), 1e7) if dz != 0 else 1e7
         max_z = delta_z * (1.0 - glm.fract(z1)) if dz > 0 else delta_z * glm.fract(z1)
-
-        # Reset results
-        self.voxel_id = None
-        self.voxel_normal = None
-        self.local_world = None
-        self.chunk = None
-        self.voxel_index = None
-        self.voxel_local_pos = None
-        self.voxel_world_pos = None
 
         while not (max_x > 1.0 and max_y > 1.0 and max_z > 1.0):
             result = self.world_container.get_voxel(current_voxel_pos)
@@ -317,17 +333,12 @@ class VoxelHandler:
             self._remove_block_at(self.voxel_world_pos)
 
     def _place_block_at(self, pos: glm.ivec3):
-        """Place a block at the given world position if empty."""
-        result = self.world_container.get_voxel(pos)
-        if result is not None:
-            get_logger_info('DEBUG', f'Cannot place block at {pos}: space occupied')
-            return
-
-        lw = self.world_container.get_local_world_at(pos)
+        """Place a block at the given global position if empty."""
+        lw = self.world_container.active_world
         if lw is None:
             return
 
-        local_pos = pos - lw.position
+        local_pos = lw.global_to_local(glm.vec3(pos))
         wx, wy, wz = int(local_pos.x), int(local_pos.y), int(local_pos.z)
         cx = wx // CHUNK_SIZE
         cy = wy // CHUNK_SIZE
@@ -343,6 +354,10 @@ class VoxelHandler:
         lz = wz - cz * CHUNK_SIZE
         voxel_index = lx + CHUNK_SIZE * lz + CHUNK_AREA * ly
 
+        if chunk.voxels[voxel_index] != 0:
+            get_logger_info('DEBUG', f'Cannot place block at {pos}: space occupied')
+            return
+
         chunk.voxels[voxel_index] = self.new_voxel_id
         chunk.mesh.rebuild()
         if chunk.is_empty:
@@ -351,8 +366,12 @@ class VoxelHandler:
         get_logger_info('DEBUG', f'Placed block {self.new_voxel_id} at {pos}')
 
     def _remove_block_at(self, pos: glm.ivec3):
-        """Remove the block at the given world position if present."""
-        result = self.world_container.get_voxel(pos)
+        """Remove the block at the given global position if present."""
+        lw = self.world_container.active_world
+        if lw is None:
+            return
+
+        result = lw.get_voxel_global(glm.vec3(pos))
         if result is None:
             return
         voxel_id, local_pos, chunk, voxel_index = result
@@ -361,10 +380,7 @@ class VoxelHandler:
 
         chunk.voxels[voxel_index] = 0
         chunk.mesh.rebuild()
-
-        lw = self.world_container.get_local_world_at(pos)
-        if lw is not None:
-            self._rebuild_adjacent_chunks(lw, local_pos, pos)
+        self._rebuild_adjacent_chunks(lw, local_pos, pos)
         get_logger_info('DEBUG', f'Removed block at {pos}')
 
     def _rebuild_adjacent_chunks(self, lw, local_pos: glm.ivec3, world_pos: glm.ivec3):
@@ -372,8 +388,7 @@ class VoxelHandler:
         lx, ly, lz = local_pos.x, local_pos.y, local_pos.z
         wx, wy, wz = int(world_pos.x), int(world_pos.y), int(world_pos.z)
 
-        # Determine chunk coordinates of the modified block within the local world
-        local_world_pos = world_pos - lw.position
+        local_world_pos = lw.global_to_local(glm.vec3(world_pos))
         cx = int(local_world_pos.x // CHUNK_SIZE)
         cy = int(local_world_pos.y // CHUNK_SIZE)
         cz = int(local_world_pos.z // CHUNK_SIZE)

@@ -87,9 +87,21 @@ class ARController:
         self._open_palm_active = False
         self._open_palm_used_to_close = False
 
+        # Object transform state
+        self.is_transforming = False
+        self.transform_start_pos = None
+        self.transform_start_rot = None
+        self.transform_start_obj_pos = None
+        self._obj_scale_start_dist = None
+        self._obj_scale_start_scale = None
+
         get_logger_info('AR', 'THREAD FOR AR SYSTEM INITIALIZED')
         self.thread = threading.Thread(target=self._tracking_loop, daemon=True)
         self.thread.start()
+
+    @property
+    def world_container(self):
+        return self.engine.scene.world_container
 
     def _tracking_loop(self):
         while self.running:
@@ -162,6 +174,12 @@ class ARController:
         # Reset per‑frame flags
         self.right_point_hit_pos = None
 
+        # Convenience references
+        vh = self.engine.scene.world_container.voxel_handler
+        container = self.engine.scene.world_container
+        selected = container.selected_object
+        active_world = container.active_world
+
         for ev in events:
             if ev is None:
                 continue
@@ -177,10 +195,10 @@ class ARController:
                     elif ev.event_type == 'END':
                         if not self.pinch_hold_emitted['LEFT']:
                             get_logger_info('DEBUG', 'Left quick pinch – toggling mode')
-                            self.engine.scene.world_container.voxel_handler.switch_mode()
+                            vh.switch_mode()
                         self.pinch_active_left = False
+
                 elif ev.hand == 'RIGHT':
-                    vh = self.engine.scene.world_container.voxel_handler
                     if vh.interaction_mode == 2:  # GRAB mode
                         if ev.event_type == 'START' and not self.is_grabbing:
                             center = self.right_point_hit_pos or self.get_block_under_hand(self.smooth_right_landmarks)
@@ -203,6 +221,7 @@ class ARController:
                         elif ev.event_type == 'END' and self.is_grabbing:
                             self._end_grab()
                     else:
+                        # Normal pinch (add/remove voxel or select object)
                         if ev.event_type == 'START':
                             self.pinch_active_right = True
                             self.pinch_hold_emitted['RIGHT'] = False
@@ -210,41 +229,87 @@ class ARController:
                             self.pinch_hold_emitted['RIGHT'] = True
                         elif ev.event_type == 'END':
                             if not self.pinch_hold_emitted['RIGHT']:
-                                vh.set_voxel()
+                                if vh.interaction_mode == 4:   # OBJECT mode
+                                    if vh.object_hit is not None:
+                                        container.selected_object = vh.object_hit
+                                        if isinstance(vh.object_hit, LocalWorld):
+                                            container.active_world = vh.object_hit
+                                        get_logger_info('AR', f'Selected object: {vh.object_hit}')
+                                else:
+                                    vh.set_voxel()
                             self.pinch_active_right = False
 
             # ----- TWO‑FINGER‑UP -----
             elif ev.gesture_name == 'two_finger_up':
                 get_logger_info('DEBUG', f'Two-finger-up {ev.hand} {ev.event_type} value={ev.value}')
+
+                # --- LEFT HAND ---
                 if ev.hand == 'LEFT':
-                    if ev.event_type == 'START' and ev.value is not None:
-                        self.two_finger_up_left_active = True
-                        self.two_finger_up_left_pos = ev.value
-                    elif ev.event_type == 'UPDATE' and ev.value is not None and self.two_finger_up_left_pos is not None:
-                        dx = ev.value[0] - self.two_finger_up_left_pos[0]
-                        dy = ev.value[1] - self.two_finger_up_left_pos[1]
-                        world = self.engine.scene.world
-                        world.world_yaw += dx * 2.0
-                        world.world_pitch += dy * 2.0
-                        world.world_pitch = max(-1.5, min(1.5, world.world_pitch))
-                        self.two_finger_up_left_pos = ev.value
-                    elif ev.event_type == 'END':
-                        self.two_finger_up_left_active = False
-                        self.two_finger_up_left_pos = None
+                    # If an object is selected, two‑finger‑up rotates it.
+                    if selected is not None:
+                        if ev.event_type == 'START' and ev.value is not None:
+                            self.is_transforming = True
+                            self.transform_start_pos = ev.value
+                            self.transform_start_rot = glm.eulerAngles(selected.rotation)
+                        elif ev.event_type == 'UPDATE' and self.is_transforming and ev.value is not None:
+                            dx = ev.value[0] - self.transform_start_pos[0]
+                            dy = ev.value[1] - self.transform_start_pos[1]
+                            new_yaw = self.transform_start_rot.y + dx * 2.0
+                            new_pitch = self.transform_start_rot.x + dy * 2.0
+                            new_pitch = max(-1.5, min(1.5, new_pitch))
+                            selected.rotation = glm.quat(glm.vec3(new_pitch, new_yaw, 0.0))
+                        elif ev.event_type == 'END':
+                            self.is_transforming = False
+                    else:
+                        # Fallback: rotate active world (legacy behaviour)
+                        if ev.event_type == 'START' and ev.value is not None:
+                            self.two_finger_up_left_active = True
+                            self.two_finger_up_left_pos = ev.value
+                        elif ev.event_type == 'UPDATE' and ev.value is not None and self.two_finger_up_left_pos is not None:
+                            dx = ev.value[0] - self.two_finger_up_left_pos[0]
+                            dy = ev.value[1] - self.two_finger_up_left_pos[1]
+                            if active_world is not None:
+                                active_world.world_yaw += dx * 2.0
+                                active_world.world_pitch += dy * 2.0
+                                active_world.world_pitch = max(-1.5, min(1.5, active_world.world_pitch))
+                            self.two_finger_up_left_pos = ev.value
+                        elif ev.event_type == 'END':
+                            self.two_finger_up_left_active = False
+                            self.two_finger_up_left_pos = None
+
+                # --- RIGHT HAND ---
                 elif ev.hand == 'RIGHT':
-                    if ev.event_type == 'START' and ev.value is not None:
-                        self.two_finger_up_right_active = True
-                        self.two_finger_up_right_pos = ev.value
-                    elif ev.event_type == 'UPDATE' and ev.value is not None and self.two_finger_up_right_pos is not None:
-                        dx = ev.value[0] - self.two_finger_up_right_pos[0]
-                        dy = ev.value[1] - self.two_finger_up_right_pos[1]
-                        if self.engine.player.mode == "FPS":
-                            self.engine.player.fps_camera.rotate_yaw(dx * 2.0)
-                            self.engine.player.fps_camera.rotate_pitch(dy * 2.0)
-                        self.two_finger_up_right_pos = ev.value
-                    elif ev.event_type == 'END':
-                        self.two_finger_up_right_active = False
-                        self.two_finger_up_right_pos = None
+                    # If an object is selected, two‑finger‑up moves it in the camera plane.
+                    if selected is not None:
+                        if ev.event_type == 'START' and ev.value is not None:
+                            self.is_transforming = True
+                            self.transform_start_pos = ev.value
+                            self.transform_start_obj_pos = glm.vec3(selected.position)
+                        elif ev.event_type == 'UPDATE' and self.is_transforming and ev.value is not None:
+                            dx = ev.value[0] - self.transform_start_pos[0]
+                            dy = ev.value[1] - self.transform_start_pos[1]
+                            cam_right = self.engine.player.right
+                            cam_up = self.engine.player.up
+                            move = cam_right * dx * 5.0 + cam_up * (-dy) * 5.0
+                            selected.position = self.transform_start_obj_pos + move
+                        elif ev.event_type == 'END':
+                            self.is_transforming = False
+                    else:
+                        # Fallback: rotate camera (FPS) or world (RTS)
+                        if ev.event_type == 'START' and ev.value is not None:
+                            self.two_finger_up_right_active = True
+                            self.two_finger_up_right_pos = ev.value
+                        elif ev.event_type == 'UPDATE' and ev.value is not None and self.two_finger_up_right_pos is not None:
+                            dx = ev.value[0] - self.two_finger_up_right_pos[0]
+                            dy = ev.value[1] - self.two_finger_up_right_pos[1]
+                            if self.engine.player.mode == "FPS":
+                                self.engine.player.fps_camera.rotate_yaw(dx * 2.0)
+                                self.engine.player.fps_camera.rotate_pitch(dy * 2.0)
+                            # In RTS mode, right two‑finger could also move the active world? Not implemented.
+                            self.two_finger_up_right_pos = ev.value
+                        elif ev.event_type == 'END':
+                            self.two_finger_up_right_active = False
+                            self.two_finger_up_right_pos = None
 
             # ----- OPEN PALM (LEFT) -----
             elif ev.gesture_name == 'open_palm' and ev.hand == 'LEFT':
@@ -264,18 +329,10 @@ class ARController:
             # ----- OPEN PALM (RIGHT) -----
             elif ev.gesture_name == 'open_palm' and ev.hand == 'RIGHT':
                 if ev.event_type == 'START':
-                    vh = self.engine.scene.world_container.voxel_handler
-                    if vh.interaction_mode == 3:
+                    if vh.interaction_mode == 3:   # VIEWING mode
                         if self.last_right_point_hit_pos is not None:
                             self.show_block_info(self.last_right_point_hit_pos)
                             self.last_right_point_hit_pos = None
-                # elif ev.event_type == 'HOLD' and not self.radial_menu_active and not self._open_palm_used_to_close:
-                #     if self.smooth_left_pos is not None:
-                #         self.radial_menu_type = 'worldgen'
-                #         self.open_radial_menu(self.smooth_right_pos, WORLD_GEN_MENU)
-                # elif ev.event_type == 'END':
-                #     self._open_palm_active = False
-                #     self._open_palm_used_to_close = False
 
             # ----- POINT (LEFT) – menu navigation -----
             elif ev.gesture_name == 'point' and ev.hand == 'LEFT':
@@ -286,19 +343,18 @@ class ARController:
 
             # ----- POINT (RIGHT) – menu navigation or grab target -----
             elif ev.gesture_name == 'point' and ev.hand == 'RIGHT':
-                vh = self.engine.scene.world_container.voxel_handler
                 if self.radial_menu_active:
-                    # Navigate radial menu (world generation)
                     if ev.event_type == 'UPDATE' and ev.value is not None:
                         screen_x = ev.value[0] * WIN_RES[0]
                         screen_y = ev.value[1] * WIN_RES[1]
                         self.engine.scene.hud.radial_menu.update_selection((screen_x, screen_y))
-                elif vh.interaction_mode == 3 and ev.event_type == 'UPDATE' and ev.value is not None:
+                elif vh.interaction_mode == 2 and ev.event_type == 'UPDATE' and ev.value is not None:
                     # Grab target mode
                     self.right_point_hit_pos = self.get_block_under_hand(self.smooth_right_landmarks)
                     if self.right_point_hit_pos is not None:
                         self.last_right_point_hit_pos = self.right_point_hit_pos
 
+        # ----- POST‑EVENT UPDATES -----
         # Update smoothed positions for crosshair
         self.smooth_left_pos = self.smooth_left_landmarks[8] if len(self.smooth_left_landmarks) > 8 else None
         self.smooth_right_pos = self.smooth_right_landmarks[8] if len(self.smooth_right_landmarks) > 8 else None
@@ -307,27 +363,37 @@ class ARController:
         self.ar_mouse_pos = (self.smooth_right_pos.x * WIN_RES[0], self.smooth_right_pos.y * WIN_RES[1]) if self.smooth_right_pos else None
         self.ar_right_click = self.pinch_active_right
 
-        # Two‑hand pinch zoom (re-enabled)
+        # ----- TWO‑HAND PINCH (Scale selected object or active world) -----
         if self.pinch_active_right and self.pinch_active_left:
             if self.smooth_left_pos and self.smooth_right_pos:
                 l_pixel = (self.smooth_left_pos.x * WIN_RES[0], self.smooth_left_pos.y * WIN_RES[1])
                 r_pixel = (self.smooth_right_pos.x * WIN_RES[0], self.smooth_right_pos.y * WIN_RES[1])
                 current_dist = math.hypot(l_pixel[0] - r_pixel[0], l_pixel[1] - r_pixel[1])
-                if self.last_zoom_dist is not None:
-                    delta = (current_dist - self.last_zoom_dist) * 0.005
-                    self.engine.scene.world.world_scale += delta
-                    self.engine.scene.world.world_scale = max(0.1, min(10.0, self.engine.scene.world.world_scale))
-                self.last_zoom_dist = current_dist
+
+                # Scale selected object if any, else scale active world
+                if selected is not None:
+                    if self._obj_scale_start_dist is None:
+                        self._obj_scale_start_dist = current_dist
+                        self._obj_scale_start_scale = selected.scale.x
+                    else:
+                        factor = current_dist / self._obj_scale_start_dist
+                        new_scale = self._obj_scale_start_scale * factor
+                        new_scale = max(0.1, min(5.0, new_scale))
+                        selected.scale = glm.vec3(new_scale)
+                else:
+                    # Legacy world scaling (uses active world)
+                    if self.last_zoom_dist is not None:
+                        delta = (current_dist - self.last_zoom_dist) * 0.005
+                        if active_world is not None:
+                            active_world.world_scale += delta
+                            active_world.world_scale = max(0.1, min(10.0, active_world.world_scale))
+                    self.last_zoom_dist = current_dist
             else:
                 self.last_zoom_dist = None
-
-        # # Clean up pinch if hand disappeared
-        # if not self.smooth_left_landmarks: # and self._hand_type_left == "REAL":
-        #     self.pinch_active_left = False
-        #     self.pinch_hold_emitted['LEFT'] = False
-        # if not self.smooth_right_landmarks: # and self._hand_type_right == "REAL":
-        #     self.pinch_active_right = False
-        #     self.pinch_hold_emitted['RIGHT'] = False
+                self._obj_scale_start_dist = None
+        else:
+            self.last_zoom_dist = None
+            self._obj_scale_start_dist = None
 
         # Update ghost region
         if hasattr(self.engine.scene, 'ghost_region'):

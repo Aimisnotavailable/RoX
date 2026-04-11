@@ -5,28 +5,29 @@ from world_handler.world_data_handler import save_chunk, load_chunk
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from objects.world_objects import WorldObjects
+from world_objects.selectable_object import SelectableObject
 import threading
 
 
-
-class LocalWorld:
+class LocalWorld(SelectableObject):
     def __init__(self, engine):
+        super().__init__()
         self.engine = engine
         self.chunks = [None for _ in range(WORLD_VOL)]
         self.voxels = np.empty([WORLD_VOL, CHUNK_VOL], dtype='uint8')
-        self.position = glm.ivec3(0, 0, 0)
+        self.position = glm.vec3(0, 0, 0)
         self.objects : List[WorldObjects] = [WorldObjects('sphere')]
         self.new_world = False
 
-        self.rotation = (random.random() + 0.2, random.random() * math.pi * 2)
+        # Initial rotation (random)
+        init_yaw = random.random() * math.pi * 2
+        init_pitch = random.random() + 0.2
+        self.rotation = glm.quat(glm.vec3(init_pitch, init_yaw, 0.0))
+        self.scale = glm.vec3(1.0)
 
         build_meshes = True
         new_world = True
         self.new_world = new_world
-
-        # Background saver for chunks (non‑blocking I/O)
-        # Disable background saving for now
-        # self.save_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="chunk_saver")
 
         if new_world:
             get_logger_info("DEBUG", f"Time : {datetime.now()}")
@@ -37,24 +38,115 @@ class LocalWorld:
             get_logger_info("DEBUG", f"WORLD BUILDING DONE")
             get_logger_info("DEBUG", f"Time : {datetime.now()}")
 
-        self.world_yaw = self.rotation[0]
-        self.world_pitch = self.rotation[1]
-        self.world_scale = 1.0
         self.world_swapping = False
 
-    
+    # ------------------------------------------------------------------
+    # Compatibility properties for existing code
+    # ------------------------------------------------------------------
+    @property
+    def world_yaw(self):
+        return glm.eulerAngles(self.rotation).y
+
+    @world_yaw.setter
+    def world_yaw(self, value):
+        euler = glm.eulerAngles(self.rotation)
+        euler.y = value
+        self.rotation = glm.quat(euler)
+
+    @property
+    def world_pitch(self):
+        return glm.eulerAngles(self.rotation).x
+
+    @world_pitch.setter
+    def world_pitch(self, value):
+        euler = glm.eulerAngles(self.rotation)
+        euler.x = value
+        self.rotation = glm.quat(euler)
+
+    @property
+    def world_scale(self):
+        return self.scale.x
+
+    @world_scale.setter
+    def world_scale(self, value):
+        self.scale = glm.vec3(value)
+
+    # ------------------------------------------------------------------
+    # SelectableObject implementation
+    # ------------------------------------------------------------------
+    def get_local_aabb(self) -> tuple[glm.vec3, glm.vec3]:
+        """Local bounding box covers the entire voxel volume."""
+        return (
+            glm.vec3(0.0),
+            glm.vec3(WORLD_W * CHUNK_SIZE, WORLD_H * CHUNK_SIZE, WORLD_D * CHUNK_SIZE)
+        )
 
     @property
     def m_model(self):
-        m_model = glm.mat4(1.0)
-        center = glm.vec3(WORLD_W * CHUNK_SIZE / 2, WORLD_H * CHUNK_SIZE / 2, WORLD_D * CHUNK_SIZE / 2)
-        m_model = glm.translate(m_model, center)
-        m_model = glm.rotate(m_model, self.world_pitch, glm.vec3(1, 0, 0))
-        m_model = glm.rotate(m_model, self.world_yaw, glm.vec3(0, 1, 0))
-        m_model = glm.scale(m_model, glm.vec3(self.world_scale))
-        m_model = glm.translate(m_model, -center)
-        return m_model
+        """Compatibility alias for model_matrix."""
+        return self.model_matrix
 
+    # ------------------------------------------------------------------
+    # Transform‑aware methods for global ↔ local conversion
+    # ------------------------------------------------------------------
+    def global_to_local(self, global_pos: glm.vec3 | glm.ivec3) -> glm.vec3:
+        """Convert a global position to this world's local coordinates."""
+        if isinstance(global_pos, glm.ivec3):
+            global_pos = glm.vec3(global_pos)
+        inv_model = glm.inverse(self.m_model)
+        return glm.vec3(inv_model * glm.vec4(global_pos, 1.0))
+
+    def local_to_global(self, local_pos: glm.vec3 | glm.ivec3) -> glm.vec3:
+        """Convert a local position to global coordinates."""
+        if isinstance(local_pos, glm.ivec3):
+            local_pos = glm.vec3(local_pos)
+        return glm.vec3(self.m_model * glm.vec4(local_pos, 1.0))
+
+    def contains_global(self, global_pos: glm.vec3 | glm.ivec3) -> bool:
+        """Check if a global position lies inside this world's bounds."""
+        local = self.global_to_local(global_pos)
+        return (0 <= local.x < WORLD_W * CHUNK_SIZE and
+                0 <= local.y < WORLD_H * CHUNK_SIZE and
+                0 <= local.z < WORLD_D * CHUNK_SIZE)
+
+    def get_voxel_global(self, global_pos: glm.vec3 | glm.ivec3) -> tuple[int, glm.ivec3, Chunk, int] | None:
+        """
+        Return (voxel_id, local_position_in_chunk, chunk, voxel_index)
+        for the voxel at the given global position, or None if air/outside.
+        """
+        if isinstance(global_pos, glm.ivec3):
+            global_pos = glm.vec3(global_pos)
+
+        if not self.contains_global(global_pos):
+            return None
+
+        local = self.global_to_local(global_pos)
+        wx = int(local.x)
+        wy = int(local.y)
+        wz = int(local.z)
+
+        cx = wx // CHUNK_SIZE
+        cy = wy // CHUNK_SIZE
+        cz = wz // CHUNK_SIZE
+
+        chunk_index = cx + WORLD_W * cz + WORLD_AREA * cy
+        chunk = self.chunks[chunk_index]
+        if chunk is None:
+            return None
+
+        lx = wx - cx * CHUNK_SIZE
+        ly = wy - cy * CHUNK_SIZE
+        lz = wz - cz * CHUNK_SIZE
+        voxel_index = lx + CHUNK_SIZE * lz + CHUNK_AREA * ly
+        voxel_id = chunk.voxels[voxel_index]
+
+        if voxel_id == 0:
+            return None
+        return voxel_id, glm.ivec3(lx, ly, lz), chunk, voxel_index
+
+    # ------------------------------------------------------------------
+    # Original methods (unchanged except where noted)
+    # ------------------------------------------------------------------
     def update(self):
         if not self.new_world:
             inv_model = glm.inverse(self.m_model)
@@ -64,8 +156,10 @@ class LocalWorld:
             z = int(local_player_pos.z // CHUNK_SIZE)
             self.load_visible_chunks(x, y, z)
 
-        self.world_yaw += self.rotation[0] * self.engine.delta_time * 0.001
-        
+        # Auto-rotate (optional) – using quaternion
+        rot_speed = 0.001 * self.engine.delta_time
+        # self.rotation = glm.quat(glm.vec3(0.0, rot_speed, 0.0)) * self.rotation
+
     def load_visible_chunks(self, center_x, center_y, center_z):
         WORLD_W_local = WORLD_W
         WORLD_H_local = WORLD_H
@@ -119,13 +213,11 @@ class LocalWorld:
         self.rebuild_chunk_mesh(mesh_to_build)
 
     def build_chunks(self, build_meshes=True):
-        # Reset arrays
         for i in range(WORLD_VOL):
             self.chunks[i] = None
         self.voxels.fill(0)
 
         generator = self.objects[0].generator
-        # Bounding box pruning
         bbox = generator.get_bounding_box() if hasattr(generator, 'get_bounding_box') else None
         positions = []
         indices = []
@@ -137,7 +229,6 @@ class LocalWorld:
             max_cy = int(min(WORLD_H - 1, bbox[3] // CHUNK_SIZE))
             min_cz = int(max(0, bbox[4] // CHUNK_SIZE))
             max_cz = int(min(WORLD_D - 1, bbox[5] // CHUNK_SIZE))
-            get_logger_info("DEBUG", f"Bounding box pruning: chunk range x[{min_cx},{max_cx}] y[{min_cy},{max_cy}] z[{min_cz},{max_cz}]")
             for cx in range(min_cx, max_cx + 1):
                 for cy in range(min_cy, max_cy + 1):
                     for cz in range(min_cz, max_cz + 1):
@@ -145,7 +236,6 @@ class LocalWorld:
                         positions.append((cx, cy, cz))
                         indices.append(idx)
         else:
-            get_logger_info("DEBUG", "Full world generation (no bounding box)")
             for x in range(WORLD_W):
                 for y in range(WORLD_H):
                     for z in range(WORLD_D):
@@ -153,7 +243,6 @@ class LocalWorld:
                         positions.append(glm.vec3(x, y, z))
                         indices.append(idx)
 
-        # Generate chunks in parallel and save each immediately
         with ThreadPoolExecutor(max_workers=8) as executor:
             futures = {}
             for pos, idx in zip(positions, indices):
@@ -179,47 +268,19 @@ class LocalWorld:
                     chunk.build_mesh()
 
     def _generate_chunk_data(self, pos, idx):
-        """Generate voxels and schedule background save (non‑blocking)."""
         chunk = Chunk(self, position=pos, generator=self.objects[0].generator)
         voxels = chunk.build_voxels()
         chunk.voxels = voxels
 
         if np.any(voxels):
-            # Save in background – do not wait
             self._save_chunk(idx, voxels)
-            #self.save_executor.submit(self._save_chunk, idx, voxels)
             return chunk, voxels
         else:
-            # Empty chunk – nothing to save
             return None, voxels
 
     def _save_chunk(self, idx, voxels):
-        """Background saving task."""
         chunk_path = CHUNK_FILE_BASE_DIR / f"chunk_{idx}.npz"
         save_chunk(chunk_path, voxels)
-
-    def regenerate_world(self, generator_type, **kwargs):
-        get_logger_info("GAME", f"Regenerating world as {generator_type} with {kwargs}")
-
-        self.engine.scene.hud.show_temp_message(f"Regenerating world as {generator_type}...", duration=10.0)
-        self.world_swapping = True
-
-        def _generate_data():
-            try:
-                # Shutdown the old world's saver to avoid race conditions
-                self.save_executor.shutdown(wait=True)
-                # Create new world with build_meshes=False
-                new_world = World(self.engine, new_world=True,
-                                  generator_type=generator_type,
-                                  build_meshes=False,
-                                  **kwargs)
-                get_logger_info("GAME", "new world generation done")
-                self.engine.scene._pending_world = new_world
-            except Exception as e:
-                get_logger_info("ERROR", f"World generation failed: {e}")
-                self.world_swapping = False
-
-        threading.Thread(target=_generate_data, daemon=True).start()
 
     def build_chunk_mesh(self):
         for chunk in self.chunks:
@@ -234,46 +295,15 @@ class LocalWorld:
     def render(self):
         for chunk in self.chunks:
             if chunk:
-                chunk.world_position = chunk.position + self.position
+                chunk.world_position = chunk.position + glm.ivec3(self.position)
                 chunk.render()
-    
+
+    # Deprecated methods kept for compatibility
     def contains(self, world_pos: glm.vec3) -> bool:
-        """Check if a world position is inside this local world's bounds."""
-        local = world_pos - self.position
-        return (0 <= local.x < WORLD_W * CHUNK_SIZE and
-                0 <= local.y < WORLD_H * CHUNK_SIZE and
-                0 <= local.z < WORLD_D * CHUNK_SIZE)
+        return self.contains_global(world_pos)
 
     def get_voxel(self, world_pos: glm.vec3) -> tuple[int, glm.ivec3, Chunk] | None:
-        """Return (voxel_id, local_position_in_chunk, chunk) or None if air/outside."""
-        if not self.contains(world_pos):
+        result = self.get_voxel_global(world_pos)
+        if result is None:
             return None
-
-        local = world_pos - self.position
-        wx = int(local.x)
-        wy = int(local.y)
-        wz = int(local.z)
-
-        cx = wx // CHUNK_SIZE
-        cy = wy // CHUNK_SIZE
-        cz = wz // CHUNK_SIZE
-
-        chunk_index = cx + WORLD_W * cz + WORLD_AREA * cy
-        chunk = self.chunks[chunk_index]
-        if chunk is None:
-            return None
-
-        lx = wx - cx * CHUNK_SIZE
-        ly = wy - cy * CHUNK_SIZE
-        lz = wz - cz * CHUNK_SIZE
-        voxel_index = lx + CHUNK_SIZE * lz + CHUNK_AREA * ly
-        voxel_id = chunk.voxels[voxel_index]
-
-        if voxel_id == 0:
-            return None
-        return voxel_id, glm.ivec3(lx, ly, lz), chunk, voxel_index
-
-
-    def shutdown(self):
-        """Call this when destroying the world to flush pending saves."""
-        self.save_executor.shutdown(wait=True)
+        return result[0], result[1], result[2]

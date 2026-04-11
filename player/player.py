@@ -156,33 +156,52 @@ class Player:
             self.active_camera.move_right(vel)
         if key_state[pg.K_a]:
             self.active_camera.move_left(vel)
-            
-        # Optional vertical movement for FPS
         if self.mode == "FPS":
             if key_state[pg.K_q]:
                 self.active_camera.move_up(vel)
             if key_state[pg.K_e]:
                 self.active_camera.move_down(vel)
         
-        scale_speed = 2.0 * self.engine.delta_time * 0.001
-        if key_state[pg.K_x]: 
-            self.engine.scene.world_container.local_worlds[0].world_scale += scale_speed
-        if key_state[pg.K_z]: 
-            self.engine.scene.world_container.local_worlds[0].world_scale -= scale_speed
-            
-        self.engine.scene.world_container.local_worlds[0].world_scale = glm.clamp(self.engine.scene.world_container.local_worlds[0].world_scale, 0.1, 5.0)
+        # Transform selected object with keyboard (if any)
+        selected = self.engine.scene.world_container.selected_object
+        if selected is not None:
+            scale_speed = 2.0 * self.engine.delta_time * 0.001
+            if key_state[pg.K_x]: 
+                selected.scale += glm.vec3(scale_speed)
+            if key_state[pg.K_z]: 
+                selected.scale -= glm.vec3(scale_speed)
+            selected.scale = glm.clamp(selected.scale, 0.1, 5.0)
 
-        rotation_speed = 2.0 * self.engine.delta_time * 0.001
-        if key_state[pg.K_LEFT]: 
-            self.engine.scene.world_container.local_worlds[0].world_yaw -= rotation_speed
-        if key_state[pg.K_RIGHT]: 
-            self.engine.scene.world_container.local_worlds[0].world_yaw += rotation_speed
-        if key_state[pg.K_UP]: 
-            self.engine.scene.world_container.local_worlds[0].world_pitch -= rotation_speed
-        if key_state[pg.K_DOWN]: 
-            self.engine.scene.world_container.local_worlds[0].world_pitch += rotation_speed
+            rotation_speed = 2.0 * self.engine.delta_time * 0.001
+            euler = glm.eulerAngles(selected.rotation)
+            if key_state[pg.K_LEFT]: 
+                euler.y -= rotation_speed
+            if key_state[pg.K_RIGHT]: 
+                euler.y += rotation_speed
+            if key_state[pg.K_UP]: 
+                euler.x -= rotation_speed
+            if key_state[pg.K_DOWN]: 
+                euler.x += rotation_speed
+            selected.rotation = glm.quat(euler)
+        else:
+            # Fallback to first world (legacy)
+            world = self.engine.scene.world_container.local_worlds[0]
+            scale_speed = 2.0 * self.engine.delta_time * 0.001
+            if key_state[pg.K_x]: 
+                world.world_scale += scale_speed
+            if key_state[pg.K_z]: 
+                world.world_scale -= scale_speed
+            world.world_scale = glm.clamp(world.world_scale, 0.1, 5.0)
+            rotation_speed = 2.0 * self.engine.delta_time * 0.001
+            if key_state[pg.K_LEFT]: 
+                world.world_yaw -= rotation_speed
+            if key_state[pg.K_RIGHT]: 
+                world.world_yaw += rotation_speed
+            if key_state[pg.K_UP]: 
+                world.world_pitch -= rotation_speed
+            if key_state[pg.K_DOWN]: 
+                world.world_pitch += rotation_speed
 
-        # Reset speed if no movement keys are pressed
         if not (key_state[pg.K_w] or key_state[pg.K_s] or
                 key_state[pg.K_a] or key_state[pg.K_d] or
                 key_state[pg.K_q] or key_state[pg.K_e]):
