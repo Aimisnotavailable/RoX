@@ -223,7 +223,7 @@ class ARController:
                     elif ev.event_type == 'UPDATE' and ev.value is not None and self.two_finger_up_left_pos is not None:
                         dx = ev.value[0] - self.two_finger_up_left_pos[0]
                         dy = ev.value[1] - self.two_finger_up_left_pos[1]
-                        world = self.engine.scene.world
+                        world = self.engine.scene.world_container.local_worlds[0]
                         world.world_yaw += dx * 2.0
                         world.world_pitch += dy * 2.0
                         world.world_pitch = max(-1.5, min(1.5, world.world_pitch))
@@ -307,19 +307,19 @@ class ARController:
         self.ar_mouse_pos = (self.smooth_right_pos.x * WIN_RES[0], self.smooth_right_pos.y * WIN_RES[1]) if self.smooth_right_pos else None
         self.ar_right_click = self.pinch_active_right
 
-        # Two‑hand pinch zoom (re-enabled)
-        if self.pinch_active_right and self.pinch_active_left:
-            if self.smooth_left_pos and self.smooth_right_pos:
-                l_pixel = (self.smooth_left_pos.x * WIN_RES[0], self.smooth_left_pos.y * WIN_RES[1])
-                r_pixel = (self.smooth_right_pos.x * WIN_RES[0], self.smooth_right_pos.y * WIN_RES[1])
-                current_dist = math.hypot(l_pixel[0] - r_pixel[0], l_pixel[1] - r_pixel[1])
-                if self.last_zoom_dist is not None:
-                    delta = (current_dist - self.last_zoom_dist) * 0.005
-                    self.engine.scene.world.world_scale += delta
-                    self.engine.scene.world.world_scale = max(0.1, min(10.0, self.engine.scene.world.world_scale))
-                self.last_zoom_dist = current_dist
-            else:
-                self.last_zoom_dist = None
+        # # Two‑hand pinch zoom (re-enabled)
+        # if self.pinch_active_right and self.pinch_active_left:
+        #     if self.smooth_left_pos and self.smooth_right_pos:
+        #         l_pixel = (self.smooth_left_pos.x * WIN_RES[0], self.smooth_left_pos.y * WIN_RES[1])
+        #         r_pixel = (self.smooth_right_pos.x * WIN_RES[0], self.smooth_right_pos.y * WIN_RES[1])
+        #         current_dist = math.hypot(l_pixel[0] - r_pixel[0], l_pixel[1] - r_pixel[1])
+        #         if self.last_zoom_dist is not None:
+        #             delta = (current_dist - self.last_zoom_dist) * 0.005
+        #             self.engine.scene.world.world_scale += delta
+        #             self.engine.scene.world.world_scale = max(0.1, min(10.0, self.engine.scene.world.world_scale))
+        #         self.last_zoom_dist = current_dist
+        #     else:
+        #         self.last_zoom_dist = None
 
         # # Clean up pinch if hand disappeared
         # if not self.smooth_left_landmarks: # and self._hand_type_left == "REAL":
