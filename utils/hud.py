@@ -7,7 +7,7 @@ import time
 from settings import WIN_RES, INTERACTION_MODE, INTERACTION_COLORS
 
 RADIAL_MENU_RADIUS = 160
-
+# NEED TO REFACTOR TS TO MODULARIZED EACH PANEL AND RECTS
 # ---------- Helper functions for drawing ----------
 def draw_rounded_rect(surface, rect, color, radius=8, border_width=0, border_color=None):
     """Draw a rectangle with rounded corners. Supports border."""
