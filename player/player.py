@@ -97,7 +97,7 @@ class Player:
             elif event.key == pygame.K_r:
                 self.gen = (self.gen + 1) % len(WORLD_GEN_PARAMS)
                 gtype = list(WORLD_GEN_PARAMS)[self.gen]
-                self.engine.scene.world.regenerate_world(gtype, **WORLD_GEN_PARAMS[gtype])
+                self.engine.scene.world_container.active_world.regenerate_world(gtype, **WORLD_GEN_PARAMS[gtype])
             elif event.key == pygame.K_g:
                 self.engine.scene.world_container.local_worlds[0].position[0] += 1
                 
@@ -183,24 +183,24 @@ class Player:
             if key_state[pg.K_DOWN]: 
                 euler.x += rotation_speed
             selected.rotation = glm.quat(euler)
-        else:
-            # Fallback to first world (legacy)
-            world = self.engine.scene.world_container.local_worlds[0]
-            scale_speed = 2.0 * self.engine.delta_time * 0.001
-            if key_state[pg.K_x]: 
-                world.world_scale += scale_speed
-            if key_state[pg.K_z]: 
-                world.world_scale -= scale_speed
-            world.world_scale = glm.clamp(world.world_scale, 0.1, 5.0)
-            rotation_speed = 2.0 * self.engine.delta_time * 0.001
-            if key_state[pg.K_LEFT]: 
-                world.world_yaw -= rotation_speed
-            if key_state[pg.K_RIGHT]: 
-                world.world_yaw += rotation_speed
-            if key_state[pg.K_UP]: 
-                world.world_pitch -= rotation_speed
-            if key_state[pg.K_DOWN]: 
-                world.world_pitch += rotation_speed
+        # else:
+        #     # Fallback to first world (legacy)
+        #     world = self.engine.scene.world_container.local_worlds[0]
+        #     scale_speed = 2.0 * self.engine.delta_time * 0.001
+        #     if key_state[pg.K_x]: 
+        #         world.world_scale += scale_speed
+        #     if key_state[pg.K_z]: 
+        #         world.world_scale -= scale_speed
+        #     world.world_scale = glm.clamp(world.world_scale, 0.1, 5.0)
+        #     rotation_speed = 2.0 * self.engine.delta_time * 0.001
+        #     if key_state[pg.K_LEFT]: 
+        #         world.world_yaw -= rotation_speed
+        #     if key_state[pg.K_RIGHT]: 
+        #         world.world_yaw += rotation_speed
+        #     if key_state[pg.K_UP]: 
+        #         world.world_pitch -= rotation_speed
+        #     if key_state[pg.K_DOWN]: 
+        #         world.world_pitch += rotation_speed
 
         if not (key_state[pg.K_w] or key_state[pg.K_s] or
                 key_state[pg.K_a] or key_state[pg.K_d] or

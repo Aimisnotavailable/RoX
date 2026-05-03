@@ -43,7 +43,6 @@ class WorldContainer:
         """
         best_obj = None
         best_dist = float('inf')
-        # Include all local worlds as selectable objects
         for obj in self.local_worlds:
             dist = obj.ray_intersect(ray_origin, ray_dir)
             if dist is not None and dist < best_dist:
@@ -56,6 +55,10 @@ class WorldContainer:
         self.voxel_handler.local_world = world
 
     def update(self):
+        res = self.raycast_object(self.engine.player.position, self.engine.player.forward)
+
+        if res:
+            self.selected_object = res[0]
         for local_world in self.local_worlds:
             local_world.update()
         self.voxel_handler.update()

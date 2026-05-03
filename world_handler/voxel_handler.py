@@ -275,7 +275,7 @@ class VoxelHandler:
                 self.voxel_index = voxel_index
                 self.local_world = self.world_container.get_local_world_at(current_voxel_pos)
 
-                get_logger_info('GAME', f"{' | '.join(map(str, result))}")
+                
                 if step_dir == 0:
                     self.voxel_normal = glm.ivec3(-dx, 0, 0)
                 elif step_dir == 1:

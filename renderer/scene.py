@@ -28,7 +28,6 @@ class Scene:
 
         # Ray beam
         self.ray_beam = RayCastRay(engine, hand_label='RIGHT')
-        # ---> ADD THIS INITIALIZATION <---
         self.hud = HUD(engine)
 
     def update(self):
