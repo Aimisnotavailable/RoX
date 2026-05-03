@@ -2,7 +2,7 @@ import pygame as pg
 import moderngl as mgl
 import array
 import time
-from settings import WIN_RES
+from settings import WIN_RES, INTERACTION_MODE, INTERACTION_COLORS, glm, math
 from ui.hud_helpers import draw_rounded_rect, draw_glow_rect, RadialMenu
 from ui.panels.info_panel import InfoPanel
 from ui.panels.object_info_panel import ObjectInfoPanel
@@ -59,26 +59,28 @@ class HUD:
             CameraFeedPanel(self),
         ]
         self.radial_menu_panel = self.panels[4]  # reference for convenience
+        self.fps_values = []
+        self.fps_max_len = 40
     
     # Drawing helpers (delegated from panels)
-    def draw_glass_panel(self, surface, rect, color=(15, 20, 30, 200), accent=(80, 140, 200, 150), glow=False):
+    def draw_glass_panel(self, rect, color=(15, 20, 30, 200), accent=(80, 140, 200, 150), glow=False):
         if glow:
-            draw_glow_rect(surface, rect, accent, radius=8, glow_size=8)
-        draw_rounded_rect(surface, rect, color, radius=8)
+            draw_glow_rect(self.surface, rect, accent, radius=8, glow_size=8)
+        draw_rounded_rect(self.surface, rect, color, radius=8)
         inner_rect = rect.inflate(-4, -4)
-        draw_rounded_rect(surface, inner_rect, (*color[:3], 60), radius=6, border_width=1, border_color=accent)
+        draw_rounded_rect(self.surface, inner_rect, (*color[:3], 60), radius=6, border_width=1, border_color=accent)
     
-    def draw_circular_status(self, surface, x, y, label, status, color, radius=20):
-        pg.draw.circle(surface, (color[0], color[1], color[2], 200), (x, y), radius+2, 2)
-        pg.draw.circle(surface, (color[0], color[1], color[2], 80), (x, y), radius-2)
+    def draw_circular_status(self,x, y, label, status, color, radius=20):
+        pg.draw.circle(self.surface, (color[0], color[1], color[2], 200), (x, y), radius+2, 2)
+        pg.draw.circle(self.surface, (color[0], color[1], color[2], 80), (x, y), radius-2)
         txt = self.caption_font.render(label, True, (220, 220, 255))
         txt_rect = txt.get_rect(center=(x, y - radius - 8))
-        surface.blit(txt, txt_rect)
+        self.surface.blit(txt, txt_rect)
         status_txt = self.small_font.render(status, True, color)
         status_rect = status_txt.get_rect(center=(x, y))
         bg_rect = status_rect.inflate(8, 4)
-        draw_rounded_rect(surface, bg_rect, (0, 0, 0, 150), radius=4)
-        surface.blit(status_txt, status_rect)
+        draw_rounded_rect(self.surface, bg_rect, (0, 0, 0, 150), radius=4)
+        self.surface.blit(status_txt, status_rect)
     
     def draw_crosshair(self, surface, x, y, color, is_pinched, label, sub_label=None):
         radius = 22 if is_pinched else 28
@@ -113,7 +115,7 @@ class HUD:
             surface.blit(shadow_sub, sub_rect.move(2, 2))
             surface.blit(sub_surf, sub_rect)
     
-    def draw_text(self, surface, text, pos, color, font=None, anchor='topleft', shadow=True):
+    def draw_text(self,text, pos, color, font=None, anchor='topleft', shadow=True):
         f = font if font else self.font
         text_surf = f.render(text, True, color)
         rect = text_surf.get_rect()
@@ -123,17 +125,17 @@ class HUD:
             shadow_rect = rect.copy()
             shadow_rect.x += 2
             shadow_rect.y += 2
-            surface.blit(shadow_surf, shadow_rect)
-        surface.blit(text_surf, rect)
+            self.surface.blit(shadow_surf, shadow_rect)
+        self.surface.blit(text_surf, rect)
     
-    def draw_text_centered(self, surface, text, rect, color, font=None, bg=None):
+    def draw_text_centered(self, text, rect, color, font=None, bg=None):
         f = font if font else self.font
         text_surf = f.render(text, True, color)
         text_rect = text_surf.get_rect(center=rect.center)
         if bg:
             bg_rect = text_rect.inflate(10, 6)
-            draw_rounded_rect(surface, bg_rect, bg, radius=4)
-        surface.blit(text_surf, text_rect)
+            draw_rounded_rect(self.surface, bg_rect, bg, radius=4)
+        self.surface.blit(text_surf, text_rect)
     
     def get_screen_coords(self, pos):
         if hasattr(pos, 'x') and pos.x <= 2.0 and pos.y <= 2.0:
@@ -148,9 +150,58 @@ class HUD:
             'screen_pos': screen_pos
         }
     
-    def _draw_animated_message(self, surface):
-        # (unchanged, uses surface directly)
-        pass
+    def _draw_animated_message(self):
+        if not self.active_message:
+            return
+        now = time.time()
+        msg = self.active_message
+        elapsed = now - msg['start_time']
+        if elapsed > msg['duration']:
+            self.active_message = None
+            return
+
+        # Animation: scale and fade
+        anim_duration = 0.3
+        if elapsed < anim_duration:
+            progress = elapsed / anim_duration
+            scale = 1.0 + math.sin(progress * math.pi) * 0.2
+            alpha = int(255 * progress)
+        else:
+            scale = 1.0
+            alpha = 255
+
+        # Determine position
+        if msg['screen_pos'] is not None:
+            center_x, center_y = msg['screen_pos']
+        else:
+            center_x, center_y = self.res[0] // 2, self.res[1] - 50
+
+        panel_width = 400
+        panel_height = 80
+        scaled_w = int(panel_width * scale)
+        scaled_h = int(panel_height * scale)
+
+        # Create panel surface
+        panel_surf = pg.Surface((scaled_w, scaled_h), pg.SRCALPHA)
+        panel_rect = panel_surf.get_rect()
+        # Background with gradient
+        for i in range(scaled_h):
+            gradient_color = (15, 20, 30, int(alpha * (0.5 + 0.5 * (i/scaled_h))))
+            pg.draw.line(panel_surf, gradient_color, (0, i), (scaled_w, i))
+        # Border
+        pg.draw.rect(panel_surf, (100, 150, 200, int(alpha*0.8)), panel_rect, 2, border_radius=8)
+        # Scanline effect
+        for i in range(0, scaled_h, 4):
+            pg.draw.line(panel_surf, (100, 150, 200, int(alpha*0.2)), (0, i), (scaled_w, i))
+
+        # Text
+        text_surf = self.font.render(msg['text'], True, (255, 255, 100))
+        text_rect = text_surf.get_rect(center=panel_rect.center)
+        panel_surf.blit(text_surf, text_rect)
+
+        # Blit to main surface
+        scaled_rect = panel_surf.get_rect(center=(center_x, center_y))
+        self.surface.blit(panel_surf, scaled_rect)
     
     def update_surface(self):
         self.surface.fill((0, 0, 0, 0))
