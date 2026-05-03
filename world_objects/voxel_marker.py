@@ -3,6 +3,10 @@ from settings import *
 from meshes.cube_mesh import CubeMesh
 import glm
 
+
+# FIX
+# NOT RENDERING PROPERLY
+
 class VoxelMarker:
     def __init__(self, voxel_handler):
         self.engine = voxel_handler.engine
