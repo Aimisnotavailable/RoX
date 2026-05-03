@@ -69,8 +69,8 @@ class VoxelMarker:
         
         lw = self.handler.local_world
         if lw is None:
-            lw = self.engine.scene.world_container.local_worlds[0]
+            lw = self.engine.scene.world_container.selected_object
         
         local_model = glm.translate(glm.mat4(), glm.vec3(self.position))
         final_model = lw.m_model * local_model
-        self.mesh.program['m_model'].write(final_model.to_bytes())
+        self.mesh.program['m_model'].write(local_model.to_bytes())
