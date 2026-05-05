@@ -31,7 +31,6 @@ class VoxelMarker:
         else:
             self.object_selected = False
 
-        print(self.position)
         # 3. If an object is selected in OBJECT mode, we'll draw its bounding box
         # selected = self.engine.scene.world_container.selected_object
         # if selected and self.handler.interaction_mode == 4:

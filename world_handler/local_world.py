@@ -10,13 +10,16 @@ import threading
 
 
 class LocalWorld(SelectableObject):
-    def __init__(self, engine):
+    def __init__(self, engine, dimensions=(0, 0, 0)):
         super().__init__()
         self.engine = engine
-        self.chunks = [None for _ in range(WORLD_VOL)]
-        self.voxels = np.empty([WORLD_VOL, CHUNK_VOL], dtype='uint8')
+        self.dimensions = dimensions
+        self.world_area = dimensions[0] * dimensions[2]
+        self.world_vol = self.world_area * dimensions[1]
+        self.chunks = [None for _ in range(self.world_vol)]
+        self.voxels = np.empty([self.world_vol, CHUNK_VOL], dtype='uint8')
         self.position = glm.vec3(0, 0, 0)
-        self.objects : List[WorldObjects] = [WorldObjects('sphere')]
+        self.objects : List[WorldObjects] = [WorldObjects(dimensions, 'sphere')]
         self.new_world = False
 
         # Initial rotation (random)
@@ -35,6 +38,7 @@ class LocalWorld(SelectableObject):
             self.build_chunks(build_meshes=build_meshes)
             if build_meshes:
                 self.build_chunk_mesh()
+            print("HEHE")
             get_logger_info("DEBUG", f"WORLD BUILDING DONE")
             get_logger_info("DEBUG", f"Time : {datetime.now()}")
 
@@ -78,7 +82,7 @@ class LocalWorld(SelectableObject):
         """Local bounding box covers the entire voxel volume."""
         return (
             glm.vec3(0.0),
-            glm.vec3(WORLD_W * CHUNK_SIZE, WORLD_H * CHUNK_SIZE, WORLD_D * CHUNK_SIZE)
+            glm.vec3(self.dimensions[0] * CHUNK_SIZE, self.dimensions[1]* CHUNK_SIZE, self.dimensions[2] * CHUNK_SIZE)
         )
 
     @property
@@ -105,9 +109,9 @@ class LocalWorld(SelectableObject):
     def contains_global(self, global_pos: glm.vec3 | glm.ivec3) -> bool:
         """Check if a global position lies inside this world's bounds."""
         local = self.global_to_local(global_pos)
-        return (0 <= local.x < WORLD_W * CHUNK_SIZE and
-                0 <= local.y < WORLD_H * CHUNK_SIZE and
-                0 <= local.z < WORLD_D * CHUNK_SIZE)
+        return (0 <= local.x < self.dimensions[0] * CHUNK_SIZE and
+                0 <= local.y < self.dimensions[1] * CHUNK_SIZE and
+                0 <= local.z < self.dimensions[2] * CHUNK_SIZE)
 
     def get_voxel_global(self, global_pos: glm.vec3 | glm.ivec3) -> tuple[int, glm.ivec3, Chunk, int] | None:
         """
@@ -129,7 +133,7 @@ class LocalWorld(SelectableObject):
         cy = wy // CHUNK_SIZE
         cz = wz // CHUNK_SIZE
 
-        chunk_index = cx + WORLD_W * cz + WORLD_AREA * cy
+        chunk_index = cx + self.dimensions[0] * cz + self.world_area * cy
         chunk = self.chunks[chunk_index]
         if chunk is None:
             return None
@@ -161,10 +165,10 @@ class LocalWorld(SelectableObject):
         # self.rotation = glm.quat(glm.vec3(0.0, rot_speed, 0.0)) * self.rotation
 
     def load_visible_chunks(self, center_x, center_y, center_z):
-        WORLD_W_local = WORLD_W
-        WORLD_H_local = WORLD_H
-        WORLD_D_local = WORLD_D
-        WORLD_AREA_local = WORLD_AREA
+        WORLD_W_local = self.dimensions[0]
+        WORLD_H_local = self.dimensions[1]
+        WORLD_D_local = self.dimensions[2]
+        WORLD_AREA_local = self.world_area
         R = RENDER_DISTANCE // 2
 
         x0 = max(0, center_x - R)
@@ -213,7 +217,7 @@ class LocalWorld(SelectableObject):
         self.rebuild_chunk_mesh(mesh_to_build)
 
     def build_chunks(self, build_meshes=True):
-        for i in range(WORLD_VOL):
+        for i in range(self.world_vol):
             self.chunks[i] = None
         self.voxels.fill(0)
 
@@ -224,22 +228,22 @@ class LocalWorld(SelectableObject):
 
         if bbox is not None:
             min_cx = int(max(0, bbox[0] // CHUNK_SIZE))
-            max_cx = int(min(WORLD_W - 1, bbox[1] // CHUNK_SIZE))
+            max_cx = int(min(self.dimensions[0] - 1, bbox[1] // CHUNK_SIZE))
             min_cy = int(max(0, bbox[2] // CHUNK_SIZE))
-            max_cy = int(min(WORLD_H - 1, bbox[3] // CHUNK_SIZE))
+            max_cy = int(min(self.dimensions[1] - 1, bbox[3] // CHUNK_SIZE))
             min_cz = int(max(0, bbox[4] // CHUNK_SIZE))
-            max_cz = int(min(WORLD_D - 1, bbox[5] // CHUNK_SIZE))
+            max_cz = int(min(self.dimensions[2] - 1, bbox[5] // CHUNK_SIZE))
             for cx in range(min_cx, max_cx + 1):
                 for cy in range(min_cy, max_cy + 1):
                     for cz in range(min_cz, max_cz + 1):
-                        idx = cx + WORLD_W * cz + WORLD_AREA * cy
+                        idx = cx + self.dimensions[0] * cz + self.world_area * cy
                         positions.append((cx, cy, cz))
                         indices.append(idx)
         else:
-            for x in range(WORLD_W):
-                for y in range(WORLD_H):
-                    for z in range(WORLD_D):
-                        idx = x + WORLD_W * z + WORLD_AREA * y
+            for x in range(self.dimensions[0]):
+                for y in range(self.dimensions[1]):
+                    for z in range(self.dimensions[2]):
+                        idx = x + self.dimensions[0] * z + self.world_area * y
                         positions.append(glm.vec3(x, y, z))
                         indices.append(idx)
 
@@ -261,6 +265,7 @@ class LocalWorld(SelectableObject):
                     chunk.is_empty = not np.any(voxels)
                 except Exception as e:
                     get_logger_info("ERROR", f"Error generating chunk at {pos}: {e}")
+        
 
         if build_meshes:
             for chunk in self.chunks:

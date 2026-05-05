@@ -19,14 +19,15 @@ from objects.object_generators_func import (
     mobius_generator,
 )
 
-def create_generator(generator_type, **kwargs):
+def create_generator(dimensions, generator_type, **kwargs):
         # Default center for shape generators if not provided
         if generator_type in list(WORLD_GEN_PARAMS) and not generator_type in ('sinewave', 'wave'):
             if 'center' not in kwargs:
+                print(dimensions)
                 kwargs['center'] = (
-                    WORLD_W * CHUNK_SIZE // 2,
-                    WORLD_H * CHUNK_SIZE // 2,
-                    WORLD_D * CHUNK_SIZE // 2
+                    dimensions[0] * CHUNK_SIZE // 2,
+                    dimensions[1] * CHUNK_SIZE // 2,
+                    dimensions[2] * CHUNK_SIZE // 2
                 )
                 kwargs.update(WORLD_GEN_PARAMS[generator_type])
 

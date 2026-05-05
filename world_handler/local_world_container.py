@@ -8,7 +8,7 @@ import threading
 class WorldContainer:
     def __init__(self, engine):
         self.engine = engine
-        self.local_worlds : list[LocalWorld] = [LocalWorld(self.engine)]
+        self.local_worlds : list[LocalWorld] = [LocalWorld(self.engine, (5, 5, 5))]
         self.voxel_handler = VoxelHandler(self)
         
         # Selection state
@@ -59,6 +59,7 @@ class WorldContainer:
 
         if res:
             self.selected_object = res[0]
+            print(self.selected_object.world_vol)
         for local_world in self.local_worlds:
             local_world.update()
         self.voxel_handler.update()
