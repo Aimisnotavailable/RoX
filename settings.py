@@ -150,7 +150,7 @@ GRAB_SIZE_MENU = [
 
 
 WORLD_GEN_PARAMS = {
-    "sphere":   {"radius": 5},
+    "sphere":   {"radius": 30},
     "torus":    {"R": 80, "r": 20},
     "cube":     {"half_size": 80},
     # "cylinder": {"radius": 40, "height": 80, "axis": "y"},

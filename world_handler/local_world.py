@@ -10,7 +10,7 @@ import threading
 
 
 class LocalWorld(SelectableObject):
-    def __init__(self, engine, dimensions=(0, 0, 0)):
+    def __init__(self, engine, dimensions=(0, 0, 0), obj_type = 'sphere'):
         super().__init__()
         self.engine = engine
         self.dimensions = dimensions
@@ -19,7 +19,7 @@ class LocalWorld(SelectableObject):
         self.chunks = [None for _ in range(self.world_vol)]
         self.voxels = np.empty([self.world_vol, CHUNK_VOL], dtype='uint8')
         self.position = glm.vec3(0, 0, 0)
-        self.objects : List[WorldObjects] = [WorldObjects(dimensions, 'sphere')]
+        self.objects : List[WorldObjects] = [WorldObjects(dimensions, obj_type)]
         self.new_world = False
 
         # Initial rotation (random)
@@ -38,7 +38,6 @@ class LocalWorld(SelectableObject):
             self.build_chunks(build_meshes=build_meshes)
             if build_meshes:
                 self.build_chunk_mesh()
-            print("HEHE")
             get_logger_info("DEBUG", f"WORLD BUILDING DONE")
             get_logger_info("DEBUG", f"Time : {datetime.now()}")
 
@@ -223,6 +222,7 @@ class LocalWorld(SelectableObject):
 
         generator = self.objects[0].generator
         bbox = generator.get_bounding_box() if hasattr(generator, 'get_bounding_box') else None
+        get_logger_info('GAME', f'BBOX SIZE : {bbox}')
         positions = []
         indices = []
 
