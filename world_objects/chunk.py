@@ -5,7 +5,7 @@ from utils.terrain_gen import *
 
 
 class Chunk:
-    def __init__(self, world, position, generator=None):
+    def __init__(self, world, position, generator=None, world_dim=(0, 0, 0)):
         self.engine = world.engine
         self.world = world
         self.position = position
@@ -17,6 +17,8 @@ class Chunk:
 
         self.center = (glm.vec3(self.position) + 0.5) * CHUNK_SIZE
         self.is_on_frustum = self.engine.player.frustum.is_on_frustum
+
+        self.world_dim = world_dim
 
     def get_model_matrix(self):
         m_model = glm.translate(glm.mat4(), glm.vec3(self.position) * CHUNK_SIZE)
@@ -32,7 +34,8 @@ class Chunk:
         self.center = glm.vec3(self.position) * CHUNK_SIZE + glm.vec3(self.world.position) + 0.5 * CHUNK_SIZE
         
     def build_mesh(self):
-        self.mesh = ChunkMesh(self)
+        get_logger_info('GAME', f'world_dim : {self.world_dim}')
+        self.mesh = ChunkMesh(self, world_dim=self.world_dim)
 
     def render(self):
         if not self.is_empty and self.is_on_frustum(self):

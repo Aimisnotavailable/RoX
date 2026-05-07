@@ -273,7 +273,7 @@ class LocalWorld(SelectableObject):
                     chunk.build_mesh()
 
     def _generate_chunk_data(self, pos, idx):
-        chunk = Chunk(self, position=pos, generator=self.objects[0].generator)
+        chunk = Chunk(self, position=pos, generator=self.objects[0].generator, world_dim=self.dimensions)
         voxels = chunk.build_voxels()
         chunk.voxels = voxels
 

@@ -344,7 +344,7 @@ class VoxelHandler:
         cy = wy // CHUNK_SIZE
         cz = wz // CHUNK_SIZE
 
-        chunk_index = cx + WORLD_W * cz + WORLD_AREA * cy
+        chunk_index = cx + self.local_world.dimensions[0] * cz + self.local_world.dimensions[0] * self.local_world.dimensions[2] * cy
         chunk = lw.chunks[chunk_index]
         if chunk is None:
             return
@@ -408,8 +408,8 @@ class VoxelHandler:
             neighbors.append((cx, cy, cz + 1))
 
         for nx, ny, nz in neighbors:
-            if 0 <= nx < WORLD_W and 0 <= ny < WORLD_H and 0 <= nz < WORLD_D:
-                idx = nx + WORLD_W * nz + WORLD_AREA * ny
+            if 0 <= nx < self.local_world.dimensions[0] and 0 <= ny < self.local_world.dimensions[1] and 0 <= nz < self.local_world.dimensions[2]:
+                idx = nx + self.local_world.dimensions[0] * nz + self.local_world.dimensions[0] * self.local_world.dimensions[2] * ny
                 chunk = lw.chunks[idx]
                 if chunk is not None:
                     chunk.mesh.rebuild()

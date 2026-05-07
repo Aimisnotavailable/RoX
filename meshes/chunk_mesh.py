@@ -3,7 +3,7 @@ from meshes.chunk_mesh_builder import build_chunk_mesh
 
 
 class ChunkMesh(BaseMesh):
-    def __init__(self, chunk):
+    def __init__(self, chunk, world_dim):
         super().__init__()
         self.engine = chunk.engine
         self.chunk = chunk
@@ -13,8 +13,9 @@ class ChunkMesh(BaseMesh):
         self.vbo_format = '1u4'
         self.format_size = sum(int(fmt[:1]) for fmt in self.vbo_format.split())
         self.attrs = ('packed_data',)
+        self.world_dim = world_dim
         self.vao = self.get_vao()
-
+        
     def rebuild(self):
         self.vao = self.get_vao()
 
@@ -23,6 +24,7 @@ class ChunkMesh(BaseMesh):
             chunk_voxels=self.chunk.voxels,
             format_size=self.format_size,
             chunk_pos=self.chunk.position,
-            world_voxels=self.chunk.world.voxels
+            world_voxels=self.chunk.world.voxels,
+            world_dim=self.world_dim
         )
         return mesh
