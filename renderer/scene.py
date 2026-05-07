@@ -10,14 +10,19 @@ from utils.hud import HUD
 from world_objects.hand_renderer import HandRenderer
 from world_objects.ghost_region import GhostRegion
 from world_objects.raycast_ray import RayCastRay
+from world_objects.object_marker import ObjectMarker
+from controller.interaction_coordinator import InteractionCoordinator
 
 class Scene:
     def __init__(self, engine):
         self.engine = engine
         self.world_container = WorldContainer(self.engine)
+        self.interaction_coordinator = InteractionCoordinator(self.world_container)
         # self._pending_world = None
 
         self.voxel_marker = VoxelMarker(self.world_container.voxel_handler)
+        self.object_marker = ObjectMarker(engine)
+        self.marker = self.voxel_marker
         self.water = Water(engine)
         self.clouds = Clouds(engine)
         
@@ -40,7 +45,8 @@ class Scene:
         #     new_world.build_chunk_mesh()
 
         self.world_container.update()
-        self.voxel_marker.update()
+        
+        self.marker.update()
         self.clouds.update()
 
         ar = self.engine.ar_controller
@@ -65,7 +71,7 @@ class Scene:
         self.hand_right.render()
 
         # voxel selection
-        self.voxel_marker.render()
+        self.marker.render()
         self.ghost_region.render()
 
         self.ray_beam.render()

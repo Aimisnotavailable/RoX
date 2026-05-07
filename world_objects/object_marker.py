@@ -9,7 +9,7 @@ class ObjectMarker:
         self.mesh = CubeMesh(engine)
         self.visible = False
         self.position = glm.vec3(0.0)
-        self.size = glm.vec3(1.0)      # half extents? We'll use full size, scaling cube accordingly.
+        self.size = glm.vec3(1.0)
 
     def set_bounds(self, min_point, max_point):
         self.position = (min_point + max_point) * 0.5

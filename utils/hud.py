@@ -227,7 +227,8 @@ class HUD:
             f"BLOCK: {current_block}",
             f"MODE: {mode_str}",
             f"SCALE: {world.world_scale:.2f}x",
-            f"POS : {world.engine.player.position}"
+            f"POS : {world.engine.player.position}",
+            f"Interaction Mode :  {self.engine.scene.interaction_coordinator.mode}"
             # f"GEN: {world.generator_type.capitalize()}"
         ]
         y = info_rect.y + 20

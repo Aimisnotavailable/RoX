@@ -94,6 +94,8 @@ class Player:
         if event.type == pg.KEYDOWN:
             if event.key == pg.K_TAB:
                 self.switch_camera_mode()
+            elif event.key == pg.K_t:
+                self.engine.scene.interaction_coordinator.toggle_mode()
             elif event.key == pygame.K_r:
                 self.gen = (self.gen + 1) % len(WORLD_GEN_PARAMS)
                 gtype = list(WORLD_GEN_PARAMS)[self.gen]

@@ -41,6 +41,7 @@ class VoxelEngine:
         self.scene = Scene(self)
 
         self.ar_controller = ARController(self)
+        
 
     def update(self):
         self.player.update()

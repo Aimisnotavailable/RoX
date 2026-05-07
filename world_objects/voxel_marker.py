@@ -3,10 +3,6 @@ from settings import *
 from meshes.cube_mesh import CubeMesh
 import glm
 
-
-# FIX
-# NOT RENDERING PROPERLY
-
 class VoxelMarker:
     def __init__(self, voxel_handler):
         self.engine = voxel_handler.engine
@@ -31,32 +27,7 @@ class VoxelMarker:
         else:
             self.object_selected = False
 
-        # 3. If an object is selected in OBJECT mode, we'll draw its bounding box
-        # selected = self.engine.scene.world_container.selected_object
-        # if selected and self.handler.interaction_mode == 4:
-        #     self.object_selected = True
-        #     self.position = selected.position
-
     def render(self):
-        # if self.object_selected:
-        #     obj = self.engine.scene.world_container.selected_object
-        #     if obj:
-        #         prog = self.mesh.program
-        #         prog['m_proj'].write(self.engine.player.m_proj)
-        #         prog['m_view'].write(self.engine.player.m_view)
-        #         local_min, local_max = obj.get_local_aabb()
-        #         size = local_max - local_min
-        #         center = (local_min + local_max) * 0.5
-        #         model = obj.model_matrix * glm.translate(glm.mat4(1.0), center) * glm.scale(glm.mat4(1.0), size)
-        #         prog['m_model'].write(model)
-        #         try:
-        #             prog['mode_id'] = 3  # object selection color (e.g., yellow)
-        #         except:
-        #             pass
-        #         self.engine.ctx.wireframe = True
-        #         self.mesh.vao.render()
-        #         self.engine.ctx.wireframe = False
-
         if self.handler.voxel_id or self.handler.is_dragging:
             self.set_uniform()
             self.engine.ctx.wireframe = True

@@ -8,7 +8,7 @@ import threading
 class WorldContainer:
     def __init__(self, engine):
         self.engine = engine
-        self.local_worlds : list[LocalWorld] = [LocalWorld(self.engine, dimensions=(40, 40, 40))]
+        self.local_worlds : list[LocalWorld] = [LocalWorld(self.engine, dimensions=(15, 15, 15))]
         self.voxel_handler = VoxelHandler(self)
         
         # Selection state
