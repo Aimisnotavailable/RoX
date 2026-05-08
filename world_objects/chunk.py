@@ -34,7 +34,6 @@ class Chunk:
         self.center = glm.vec3(self.position) * CHUNK_SIZE + glm.vec3(self.world.position) + 0.5 * CHUNK_SIZE
         
     def build_mesh(self):
-        get_logger_info('GAME', f'world_dim : {self.world_dim}')
         self.mesh = ChunkMesh(self, world_dim=self.world_dim)
 
     def render(self):

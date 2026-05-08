@@ -33,6 +33,8 @@ class VoxelMarker:
             self.engine.ctx.wireframe = True
             self.mesh.render()
             self.engine.ctx.wireframe = False
+#TO-DO
+# FIX voxel marker scaling  for the current world
 
     def set_uniform(self):
         self.mesh.program['mode_id'] = self.handler.interaction_mode
@@ -42,5 +44,8 @@ class VoxelMarker:
             lw = self.engine.scene.world_container.selected_object
         
         local_model = glm.translate(glm.mat4(), glm.vec3(self.position))
-        final_model = lw.m_model * local_model
-        self.mesh.program['m_model'].write(local_model.to_bytes())
+        # final_model = lw.m_model * local_model
+        selected_object = self.engine.scene.world_container.selected_object
+        if selected_object:
+            final_model = glm.scale(local_model, selected_object.scale)
+        self.mesh.program['m_model'].write(final_model.to_bytes())

@@ -26,7 +26,7 @@ class LocalWorld(SelectableObject):
         init_yaw = 0 # random.random() * math.pi * 2
         init_pitch = 0 # random.random() + 0.2
         self.rotation = glm.quat(glm.vec3(init_pitch, init_yaw, 0.0))
-        self.scale = glm.vec3(1.0)
+        self.scale = glm.vec3(5)
 
         build_meshes = True
         new_world = True
