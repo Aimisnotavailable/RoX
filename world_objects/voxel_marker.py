@@ -35,6 +35,7 @@ class VoxelMarker:
             self.engine.ctx.wireframe = False
 #TO-DO
 # FIX voxel marker scaling  for the current world
+# still broken XD
 
     def set_uniform(self):
         self.mesh.program['mode_id'] = self.handler.interaction_mode
