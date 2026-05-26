@@ -8,6 +8,9 @@ from player.player import Player
 from utils.textures import Textures
 from controller.arcontroller import ARController
 
+# TO-DO
+# BESIDE FIX EVERYTHING?
+# LOL IDK IT BROKE AGAIN
 
 class VoxelEngine:
     def __init__(self):
