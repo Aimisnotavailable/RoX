@@ -1,5 +1,6 @@
 import glm
 import numpy as np
+from settings import CHUNK_SIZE
 from abc import ABC, abstractmethod
 
 class SelectableObject(ABC):
@@ -14,11 +15,14 @@ class SelectableObject(ABC):
     @property
     def model_matrix(self) -> glm.mat4:
         """Compose model matrix from position, rotation, scale."""
-        mat = glm.mat4(1.0)
-        mat = glm.translate(mat, self.position)
-        mat = mat * glm.mat4_cast(self.rotation)
-        mat = glm.scale(mat, self.scale)
-        return mat
+        m_model = glm.mat4(1.0)
+        center = glm.vec3(self.dimensions[0] * CHUNK_SIZE / 2, self.dimensions[1] * CHUNK_SIZE / 2, self.dimensions[2] * CHUNK_SIZE / 2)
+        m_model = glm.translate(m_model, center)
+        m_model = glm.rotate(m_model, self.world_pitch, glm.vec3(1, 0, 0))
+        m_model = glm.rotate(m_model, self.world_yaw, glm.vec3(0, 1, 0))
+        m_model = glm.scale(m_model, glm.vec3(self.world_scale))
+        m_model = glm.translate(m_model, -center)
+        return m_model
     
     @abstractmethod
     def get_local_aabb(self) -> tuple[glm.vec3, glm.vec3]:
