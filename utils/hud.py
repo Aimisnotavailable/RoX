@@ -298,11 +298,11 @@ class HUD:
         if left_pos is not None:
             px, py = self.get_screen_coords(left_pos)
             sub = f"Z:{left_pos.z:.2f}"
-            self.draw_crosshair(px, py, left_color, ar.pinch_active_left, left_status, sub)
+            self.draw_crosshair(self.surface, px, py, left_color, ar.pinch_active_left, left_status, sub)
         if right_pos is not None:
             px, py = self.get_screen_coords(right_pos)
             sub = f"Z:{right_pos.z:.2f}"
-            self.draw_crosshair(px, py, right_color, ar.pinch_active_right, right_status, sub)
+            self.draw_crosshair(self.surface, px, py, right_color, ar.pinch_active_right, right_status, sub)
             if ar.pinch_active_right and vh.is_dragging:
                 self.draw_text(f"x{vh.brush_mult:.2f}", (px + 45, py - 45), (255, 255, 80), self.small_font, anchor='center')
 
