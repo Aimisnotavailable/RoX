@@ -124,14 +124,6 @@ python main.py
 
 ```
 
-# ONLY THE 3D MODE IS COMPILED PROPERLY AS OF NOW
-* **2D Mode**
-
-```bash
-python 2Drox.py
-
-```
-
 ```
 
 ```
